@@ -15,6 +15,13 @@
       "when": 1788548935650,
       "tag": "0001_unknown_blade",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788549964933,
+      "tag": "0002_secret_vanisher",
+      "breakpoints": true
     }
   ]
 }

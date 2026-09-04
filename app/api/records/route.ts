@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { getDb } from "@/db";
-import { auditLogs, documents, financialRecords, masterData, settings } from "@/db/schema";
+import { auditLogs, documents, financialRecords, masterData, settings, userPreferences } from "@/db/schema";
 import { getUserAccess, hasPermission } from "@/app/api/access";
 import { buildFinanceInsights } from "@/lib/finance-insights";
 import { transitionStatus, type WorkflowAction } from "@/lib/workflow";
@@ -71,13 +71,14 @@ export async function GET() {
     if (!user) return jsonError("กรุณาเข้าสู่ระบบ", 401);
     await seedIfEmpty(user.email);
     const db = getDb();
-    const [records, logs, config, files, masters, integration] = await Promise.all([
+    const [records, logs, config, files, masters, integration, preferences] = await Promise.all([
       db.select().from(financialRecords).orderBy(desc(financialRecords.updatedAt)),
       db.select().from(auditLogs).orderBy(desc(auditLogs.id)).limit(80),
       db.select().from(settings),
       db.select().from(documents).orderBy(desc(documents.createdAt)),
       db.select().from(masterData).orderBy(masterData.category, masterData.code),
       getIntegrationSnapshot(user.email),
+      db.select().from(userPreferences).where(eq(userPreferences.userId, user.email.trim().toLowerCase())).limit(1),
     ]);
     const access = await getUserAccess(user.email);
     const configMap = Object.fromEntries(config.map((item) => [item.key, item.value]));
@@ -89,7 +90,7 @@ export async function GET() {
       inboundEndpoint: `/api/integrations/${connector.key}`,
     }));
     return NextResponse.json(
-      { user, access, insights, records, audit: logs, settings: configMap, documents: files, masters: safeMasters, connectors, integrationEvents: integration.events },
+      { user, access, insights, records, audit: logs, settings: configMap, preferences: preferences[0] || null, documents: files, masters: safeMasters, connectors, integrationEvents: integration.events },
       { headers: { "cache-control": "private, no-store" } },
     );
   } catch (error) {

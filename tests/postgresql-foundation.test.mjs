@@ -40,3 +40,15 @@ test("on-prem deployment requires OIDC proxy and persistent storage", async () =
   assert.match(auth, /AUTH_TRUST_PROXY/);
   assert.match(auth, /x-auth-request-email/);
 });
+
+test("persists user experience settings without changing accounting permissions", async () => {
+  const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+  const api = await readFile(new URL("../app/api/preferences/route.ts", import.meta.url), "utf8");
+  const app = await readFile(new URL("../app/kc-account-app.tsx", import.meta.url), "utf8");
+  for (const table of ["userPreferences", "userSavedViews", "userDashboardLayouts", "companyExperienceSettings"]) assert.match(schema, new RegExp(`export const ${table}`));
+  assert.match(api, /UPDATE_USER_PREFERENCES/);
+  assert.match(api, /onConflictDoUpdate/);
+  assert.match(app, /data-density=/);
+  assert.match(app, /data-page-width=/);
+  assert.match(app, /savePersonalPreferences/);
+});

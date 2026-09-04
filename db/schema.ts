@@ -539,3 +539,65 @@ export const userCompanyRoles = pgTable("user_company_roles", {
   index("idx_user_company_roles_user").on(table.userId, table.isActive),
   index("idx_user_company_roles_company").on(table.companyId),
 ]);
+
+// UX/UI modernization foundation. Preferences are server-persisted and never
+// replace backend permissions or accounting controls.
+export const userPreferences = pgTable("user_preferences", {
+  userId: text("user_id").primaryKey(),
+  language: text("language").notNull().default("th"),
+  theme: text("theme").notNull().default("light"),
+  tableDensity: text("table_density").notNull().default("comfortable"),
+  sidebarMode: text("sidebar_mode").notNull().default("expanded"),
+  pageWidth: text("page_width").notNull().default("full"),
+  dateFormat: text("date_format").notNull().default("DD/MM/YYYY"),
+  negativeNumberFormat: text("negative_number_format").notNull().default("parentheses"),
+  defaultCompanyId: uuid("default_company_id").references(() => companies.id, { onDelete: "set null" }),
+  defaultBranchId: uuid("default_branch_id").references(() => branches.id, { onDelete: "set null" }),
+  updatedAt: updatedAt(),
+  version: integer("version").notNull().default(1),
+}, (table) => [
+  index("idx_user_preferences_company").on(table.defaultCompanyId),
+  index("idx_user_preferences_branch").on(table.defaultBranchId),
+  check("user_preferences_language", sql`${table.language} in ('th','en','ja','zh')`),
+  check("user_preferences_theme", sql`${table.theme} in ('light','dark','system')`),
+  check("user_preferences_density", sql`${table.tableDensity} in ('comfortable','compact')`),
+  check("user_preferences_sidebar", sql`${table.sidebarMode} in ('expanded','collapsed','auto')`),
+  check("user_preferences_page_width", sql`${table.pageWidth} in ('full','contained')`),
+]);
+
+export const userSavedViews = pgTable("user_saved_views", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+  module: text("module").notNull(),
+  name: text("name").notNull(),
+  visibility: text("visibility").notNull().default("PRIVATE"),
+  roleDefaultFor: text("role_default_for"),
+  configuration: jsonb("configuration").notNull().default(sql`'{}'::jsonb`),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (table) => [
+  uniqueIndex("uq_user_saved_views_name").on(table.userId, table.module, table.name),
+  index("idx_user_saved_views_company_module").on(table.companyId, table.module),
+  check("user_saved_views_visibility", sql`${table.visibility} in ('PRIVATE','SHARED','ROLE_DEFAULT')`),
+]);
+
+export const userDashboardLayouts = pgTable("user_dashboard_layouts", {
+  userId: text("user_id").notNull(),
+  dashboardKey: text("dashboard_key").notNull(),
+  layout: jsonb("layout").notNull().default(sql`'[]'::jsonb`),
+  updatedAt: updatedAt(),
+  version: integer("version").notNull().default(1),
+}, (table) => [primaryKey({ columns: [table.userId, table.dashboardKey] })]);
+
+export const companyExperienceSettings = pgTable("company_experience_settings", {
+  companyId: uuid("company_id").primaryKey().references(() => companies.id, { onDelete: "cascade" }),
+  applicationName: text("application_name").notNull().default("KC Account 360"),
+  themeTokens: jsonb("theme_tokens").notNull().default(sql`'{}'::jsonb`),
+  branding: jsonb("branding").notNull().default(sql`'{}'::jsonb`),
+  navigation: jsonb("navigation").notNull().default(sql`'{}'::jsonb`),
+  documentBranding: jsonb("document_branding").notNull().default(sql`'{}'::jsonb`),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: updatedAt(),
+  version: integer("version").notNull().default(1),
+});

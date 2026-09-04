@@ -1,4 +1,4 @@
-import { chatGPTSignInPath, getChatGPTUser } from "@/app/chatgpt-auth";
+import { chatGPTSignInPath, chatGPTSignOutPath, getChatGPTUser } from "@/app/chatgpt-auth";
 import KCAccountApp from "@/app/kc-account-app";
 import SignInView from "@/app/signin-view";
 
@@ -9,5 +9,5 @@ export default async function Page() {
   if (!user) {
     return <SignInView signInHref={chatGPTSignInPath("/")} />;
   }
-  return <KCAccountApp initialUser={user} />;
+  return <KCAccountApp initialUser={user} signOutHref={chatGPTSignOutPath("/")} />;
 }
