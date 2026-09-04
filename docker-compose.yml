@@ -1,0 +1,86 @@
+name: kc-account-360
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kc_account
+      POSTGRES_USER: kc_account
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kc_account -d kc_account"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+      AUTH_TRUST_PROXY: "true"
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-20}
+      KC_CUTO_OUTBOUND_TOKEN: ${KC_CUTO_OUTBOUND_TOKEN:-}
+      KC_TORY_OUTBOUND_TOKEN: ${KC_TORY_OUTBOUND_TOKEN:-}
+      KC_EAM_OUTBOUND_TOKEN: ${KC_EAM_OUTBOUND_TOKEN:-}
+      KC_HR_OUTBOUND_TOKEN: ${KC_HR_OUTBOUND_TOKEN:-}
+    volumes:
+      - document-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  migrate:
+    build:
+      context: .
+      target: migrator
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks: [backend]
+
+  auth-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.8.1
+    restart: unless-stopped
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${OIDC_ISSUER_URL:?Set OIDC_ISSUER_URL}
+      - --client-id=${OIDC_CLIENT_ID:?Set OIDC_CLIENT_ID}
+      - --client-secret=${OIDC_CLIENT_SECRET:?Set OIDC_CLIENT_SECRET}
+      - --cookie-secret=${OAUTH2_PROXY_COOKIE_SECRET:?Set OAUTH2_PROXY_COOKIE_SECRET}
+      - --email-domain=*
+      - --upstream=http://app:3000
+      - --http-address=0.0.0.0:4180
+      - --set-xauthrequest=true
+      - --pass-user-headers=true
+      - --reverse-proxy=true
+      - --cookie-secure=${OAUTH2_PROXY_COOKIE_SECURE:-true}
+    ports:
+      - "3000:4180"
+    depends_on:
+      app:
+        condition: service_healthy
+    networks: [backend]
+
+networks:
+  backend:
+    internal: false
+
+volumes:
+  postgres-data:
+  document-data:

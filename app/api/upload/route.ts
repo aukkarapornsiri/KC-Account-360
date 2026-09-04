@@ -1,10 +1,10 @@
-import { env } from "cloudflare:workers";
 import { NextResponse } from "next/server";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { getDb } from "@/db";
 import { auditLogs, documents, financialRecords } from "@/db/schema";
 import { getUserAccess, hasPermission } from "@/app/api/access";
 import { eq } from "drizzle-orm";
+import { putObject } from "@/lib/local-storage";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +23,10 @@ export async function POST(request: Request) {
   if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: "ไฟล์ต้องไม่เกิน 10 MB" }, { status: 413 });
   const allowed = ["application/pdf", "image/png", "image/jpeg", "text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
   if (!allowed.includes(file.type)) return NextResponse.json({ error: "รองรับ PDF, PNG, JPG, CSV, Excel และ Word เท่านั้น" }, { status: 415 });
-  const bucket = (env as unknown as { BUCKET?: R2Bucket }).BUCKET;
-  if (!bucket) return NextResponse.json({ error: "ระบบจัดเก็บไฟล์ยังไม่พร้อม" }, { status: 503 });
   const id = crypto.randomUUID();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
   const objectKey = `kc-account/${recordId}/${id}-${safeName}`;
-  await bucket.put(objectKey, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { uploadedBy: user.email, originalName: file.name } });
+  await putObject(objectKey, file);
   const now = new Date().toISOString();
   await db.insert(documents).values({ id, recordId, name: file.name, objectKey, contentType: file.type, size: file.size, uploadedBy: user.email, createdAt: now });
   await db.insert(auditLogs).values({ recordId, action: "UPLOAD_DOCUMENT", actorEmail: user.email, details: `Uploaded ${file.name}`, createdAt: now });

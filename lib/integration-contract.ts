@@ -118,6 +118,7 @@ export function validateExternalBaseUrl(value: string) {
   if (url.protocol !== "https:") throw new Error("Endpoint ต้องใช้ HTTPS");
   if (url.username || url.password) throw new Error("ห้ามฝัง Username หรือ Password ใน Endpoint");
   const host = url.hostname.toLowerCase();
+  const allowedHosts = new Set((process.env.KC_INTEGRATION_ALLOWED_HOSTS || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean));
   const normalizedHost = host.replace(/^\[/, "").replace(/\]$/, "");
   const blockedHost = normalizedHost === "localhost" || normalizedHost.endsWith(".local") || normalizedHost.endsWith(".internal") || normalizedHost === "::1" || normalizedHost.startsWith("fc") || normalizedHost.startsWith("fd") || normalizedHost.startsWith("fe80:") || normalizedHost === "0.0.0.0";
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)?.slice(1).map(Number);
@@ -127,7 +128,7 @@ export function validateExternalBaseUrl(value: string) {
     (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31) ||
     (ipv4[0] === 192 && ipv4[1] === 168)
   );
-  if (blockedHost || privateIpv4) throw new Error("Endpoint ต้องเป็น Public HTTPS URL ที่ปลอดภัย");
+  if ((blockedHost || privateIpv4) && !allowedHosts.has(host)) throw new Error("Endpoint ต้องเป็น Public HTTPS URL ที่ปลอดภัย หรือ Host ที่อนุญาตไว้");
   url.pathname = url.pathname.replace(/\/$/, "");
   url.search = "";
   url.hash = "";

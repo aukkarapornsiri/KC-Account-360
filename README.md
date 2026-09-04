@@ -1,93 +1,81 @@
-# vinext-starter
+# KC Account 360
 
-A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.
+Enterprise Accounting & Finance Web Application ของ KAI-COM รองรับวงจรเอกสาร AP/AR, Approval, Audit, Integration และ PostgreSQL แบบ On-Premise
 
-## Prerequisites
+## สถานะสาขา
 
-- Node.js `>=22.13.0`
-- Linux with `flock`, `curl`, and GNU `timeout`
+- `main` — Sanitized Production v25 baseline
+- `feat/on-prem-postgresql` — Phase A Accounting Foundation สำหรับตรวจสอบผ่าน Pull Request
+- Source สาธารณะไม่มีรายการธุรกรรมจริง เลขผู้เสียภาษี สมุดบัญชีธนาคาร Credential หรือ Production identifier
 
-## Sites Lifecycle
+## Phase A ที่เพิ่มในสาขานี้
 
-The Sites lifecycle CLI runs the locked dependency install before returning this checkout. Edit the source under `app/`, then checkpoint when a coherent milestone is ready to inspect or share. The remote Sites builder runs `npm run build` against the pushed commit. Do not repeat install or build as a normal pre-checkpoint step.
+- PostgreSQL schema สำหรับ Tenant, Company, Branch, Fiscal Year และ Accounting Period
+- Chart of Accounts, Account Group, Currency, Exchange Rate และ Tax Code
+- Central Accounting Event API และ Posting Rule แบบ version/effective date
+- Double-entry Journal พร้อม database guard ป้องกันรายการไม่สมดุล
+- Maker–Checker Approval, Role check, Audit Event และ Posted Journal immutability
+- Idempotency ต่อ Tenant + Source System + Key พร้อมตรวจ payload conflict
+- Persistent local document storage แทน R2
+- OIDC/OAuth2 Proxy สำหรับ On-Premise และยังคงรองรับ ChatGPT Sites headers เดิม
+- Docker Compose, Health Check และ automatic database migration
+- เก็บตารางเดิมไว้ระหว่างทยอยย้ายแต่ละ Subledger เพื่อไม่ทำลาย UI/Workflow v25
 
-This starter does not use `wrangler.jsonc`.
+## เริ่มใช้งาน On-Premise
 
-`install:ci` is intentionally a single, non-retrying `npm ci`. It refuses a concurrent install for the same project, consumes a matching image-seeded npm cache with `--prefer-offline` while retaining registry fallback for a missing cache object, otherwise downloads and verifies the complete vinext tarball recorded in `package-lock.json`, limits npm to one socket, and terminates a stalled install. `build` applies a short timeout. These helpers target Linux and use GNU `timeout`; they are not native macOS scripts.
+ต้องมี Docker Engine และ Docker Compose รุ่นที่รองรับ health-condition
 
-Scripts that need writable project-scoped home, npm, XDG, and temporary paths use `scripts/sites-env.sh`. The `dev` and `start` scripts honor the caller's runtime environment and keep Wrangler logs inside the checkout. The generated `.sites-runtime/` directory is disposable and ignored by Git.
+1. คัดลอก `.env.example` เป็น `.env`
+2. กำหนด `POSTGRES_PASSWORD`, OIDC issuer/client/secret และ cookie secret ด้วย Secret Manager ขององค์กร
+3. เปิดระบบผ่าน OAuth2 Proxy เท่านั้น ห้าม expose container `app` โดยตรงเมื่อ `AUTH_TRUST_PROXY=true`
+4. เริ่มระบบด้วย `docker compose up --build -d`
 
-## Included Shape
+Migration จะทำงานใน service `migrate` ก่อน Application เริ่ม และ endpoint `/api/health` จะตอบพร้อมใช้งานเมื่อ PostgreSQL เชื่อมต่อสำเร็จ
 
-- edit site code under `app/`
-- `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+## Development
 
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from `oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive `oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty `name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by `oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+npm ci
+cp .env.example .env
+npm run db:migrate
+npm run dev
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+คำสั่งตรวจ Release:
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs optional or required ChatGPT sign-in:
+```bash
+npm run lint
+npm run build
+npm test
+```
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send anonymous visitors through Sign in with ChatGPT.
-- In a Server Component, start sign-in with `<a href={chatGPTSignInPath(returnTo)} target="_top">`. The auth helper module is server-only; do not import it into a Client Component.
-- Do not use `fetch`, XHR, a client-side router, or a framework link that can prefetch the sign-in route. SIWC must start as a top-level navigation.
-- Never request the AuthAPI authorization endpoint directly. The dispatch-owned `/signin-with-chatgpt` route must start the SIWC flow.
-- Use `chatGPTSignOutPath(returnTo)` for browser sign-out links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because they depend on per-request identity headers.
+Cloudflare Sites/Vinext workflow เดิมยังอยู่ใน `dev:sites`, `build:sites` และ `start:sites` เพื่อใช้เปรียบเทียบหรือ rollback ระหว่าง migration
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the OAuth cookies, and identity header injection. Do not implement app routes for those reserved paths. Routes that do not import and call the helper remain anonymous-compatible.
+## Integration
 
-SIWC establishes identity only; it does not prove workspace membership. Use the Sites hosting platform's access policy controls for workspace-wide restrictions, or enforce explicit server-side membership or allowlist checks.
+ระบบเดิมยังรองรับ `POST /api/integrations/{cuto|tory|eam|hr}` แบบ backward compatible และ Phase A เพิ่ม `POST /api/v1/accounting-events`
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write actions tied to the current ChatGPT user. Leave public content anonymous.
+Headers ที่จำเป็น:
 
-## Diagnostic Commands
+- `Authorization: Bearer <connector-api-key>`
+- `X-KC-Source-System: cuto|tory|eam|hr`
+- `Idempotency-Key: <same-as-payload.idempotencyKey>`
+- `Content-Type: application/json`
 
-- `npm run install:ci`: perform the one bounded lockfile install
-- `npm run dev`: start the Vite/Vinext development server
-- `npm run build`: build the deployable Sites artifact
-- `npm run start`: start the built Vinext application
-- `npm test`: build and verify the rendered development-preview metadata
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+Event จะผ่าน Company/Branch scope, Accounting Period, Posting Rule, Account Mapping และ Balance validation ก่อนสร้าง Journal Draft หรือ Pending Approval ระบบไม่ Auto-post โดยไม่มี Approval
 
-Use build commands for targeted diagnosis after a remote failure, not as part of the normal checkpoint path.
+## Security
 
-The timeout defaults can be overridden for a controlled canary with `SITES_INSTALL_TIMEOUT`, `SITES_INSTALL_KILL_AFTER`, `SITES_BUILD_TIMEOUT`, and `SITES_BUILD_KILL_AFTER`. A timeout fails the command; the helpers never retry an unchanged install or build.
+- ห้าม commit `.env`, database dump, เอกสารบริษัท เอกสารภาษี สมุดบัญชี หรือ customer/vendor production data
+- API key แสดงครั้งเดียวและเก็บเฉพาะ SHA-256 hash โดยตรวจแบบ timing-safe
+- ไฟล์แนบจำกัดชนิด/ขนาดและ object key ถูกป้องกัน path traversal
+- Posted journal แก้ไข/ลบไม่ได้; การแก้ต้องผ่าน controlled reversal workflow ที่จะเพิ่มใน Closing/GL phase
+- Theme/menu ที่ซ่อนใน UI ไม่เปลี่ยน backend permission
 
-## Learn More
+## เอกสาร
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- `docs/GAP_ANALYSIS_TH.md`
+- `docs/ARCHITECTURE_ON_PREMISE_TH.md`
+- `docs/UX_UI_MODERNIZATION_PHASE_TH.md`
+
+ภาพและแบรนด์ KAI-COM/Account 360 ใน repository นี้เผยแพร่ตามการอนุญาตของเจ้าของโครงการ ส่วนเอกสารบริษัทและข้อมูลการเงินจริงไม่รวมอยู่ใน Source Code

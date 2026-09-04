@@ -1,10 +1,10 @@
-import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { getDb } from "@/db";
 import { auditLogs, settings } from "@/db/schema";
 import { getUserAccess, hasPermission } from "@/app/api/access";
+import { deleteObject, getObject, putObject } from "@/lib/local-storage";
 
 export const dynamic = "force-dynamic";
 const LOGO_SETTING = "brand_logo_key";
@@ -22,11 +22,10 @@ export async function GET(request: Request) {
   const objectKey = await currentLogoKey();
   if (!objectKey) return new Response("Not found", { status: 404 });
   if (objectKey.includes("-365_")) return NextResponse.redirect(new URL("/account360-logo.png", request.url));
-  const bucket = (env as unknown as { BUCKET?: R2Bucket }).BUCKET;
-  if (!bucket) return new Response("Storage unavailable", { status: 503 });
-  const object = await bucket.get(objectKey);
+  const object = await getObject(objectKey);
   if (!object) return new Response("Not found", { status: 404 });
-  return new Response(object.body, { headers: { "content-type": object.httpMetadata?.contentType || "image/png", "content-length": String(object.size), "content-disposition": "inline", "cache-control": "private, no-store" } });
+  const contentType = objectKey.toLowerCase().endsWith(".jpg") || objectKey.toLowerCase().endsWith(".jpeg") ? "image/jpeg" : "image/png";
+  return new Response(object, { headers: { "content-type": contentType, "content-length": String(object.byteLength), "content-disposition": "inline", "cache-control": "private, no-store" } });
 }
 
 export async function POST(request: Request) {
@@ -38,16 +37,14 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) return NextResponse.json({ error: "กรุณาเลือกไฟล์ Logo" }, { status: 400 });
   if (!["image/png", "image/jpeg"].includes(file.type)) return NextResponse.json({ error: "รองรับ PNG หรือ JPG เท่านั้น" }, { status: 415 });
   if (file.size > 1024 * 1024) return NextResponse.json({ error: "ไฟล์ Logo ต้องไม่เกิน 1 MB" }, { status: 413 });
-  const bucket = (env as unknown as { BUCKET?: R2Bucket }).BUCKET;
-  if (!bucket) return NextResponse.json({ error: "ระบบจัดเก็บไฟล์ยังไม่พร้อม" }, { status: 503 });
   const previousKey = await currentLogoKey(); const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const objectKey = `kc-account/branding/${crypto.randomUUID()}-${safeName}`;
-  await bucket.put(objectKey, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { uploadedBy: user.email, originalName: file.name } });
+  await putObject(objectKey, file);
   const db = getDb(); const now = new Date().toISOString();
   try {
     await db.insert(settings).values({ key: LOGO_SETTING, value: objectKey, updatedBy: user.email, updatedAt: now }).onConflictDoUpdate({ target: settings.key, set: { value: objectKey, updatedBy: user.email, updatedAt: now } });
     await db.insert(auditLogs).values({ recordId: null, action: "UPDATE_BRAND_LOGO", actorEmail: user.email, details: `Uploaded ${file.name}`, createdAt: now });
-  } catch (error) { await bucket.delete(objectKey); throw error; }
-  if (previousKey) await bucket.delete(previousKey);
+  } catch (error) { await deleteObject(objectKey); throw error; }
+  if (previousKey) await deleteObject(previousKey);
   return NextResponse.json({ ok: true, key: objectKey });
 }
 
@@ -59,6 +56,6 @@ export async function DELETE() {
   const previousKey = await currentLogoKey(); const db = getDb(); const now = new Date().toISOString();
   await db.insert(settings).values({ key: LOGO_SETTING, value: "", updatedBy: user.email, updatedAt: now }).onConflictDoUpdate({ target: settings.key, set: { value: "", updatedBy: user.email, updatedAt: now } });
   await db.insert(auditLogs).values({ recordId: null, action: "RESET_BRAND_LOGO", actorEmail: user.email, details: "Restored the standard Account 360 logo", createdAt: now });
-  if (previousKey) { const bucket = (env as unknown as { BUCKET?: R2Bucket }).BUCKET; if (bucket) await bucket.delete(previousKey); }
+  if (previousKey) await deleteObject(previousKey);
   return NextResponse.json({ ok: true });
 }

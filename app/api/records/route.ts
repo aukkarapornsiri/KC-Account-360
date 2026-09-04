@@ -1,6 +1,5 @@
-import { env } from "cloudflare:workers";
 import { NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { getDb } from "@/db";
 import { auditLogs, documents, financialRecords, masterData, settings } from "@/db/schema";
@@ -21,16 +20,14 @@ const SALES_DOCUMENT_STATUS: Record<string, string> = { Quotation: "Draft", "Sal
 
 async function seedIfEmpty(email: string) {
   const db = getDb();
-  const [seedMarker] = await db.select().from(settings).where(eq(settings.key, "seed_version")).limit(1);
-  if (seedMarker?.value === "1") return;
   const now = new Date().toISOString();
-  const base = { currency: "THB", period: PERIOD, createdBy: email, createdAt: now, updatedAt: now };
   // Public source distributions never include company transactions, counterparties,
   // tax identifiers, or monetary demo data. A fresh installation starts empty.
-  const financialSeed: Array<typeof base & {
+  const financialSeed: Array<{
     id: string; module: string; recordType: string; documentNo: string;
     sourceSystem: string; counterparty: string; description: string;
     amount: number; taxAmount: number; status: string; metadata: string;
+    currency: string; period: string; createdBy: string; createdAt: string; updatedAt: string;
     dueDate?: string; approver?: string; postedAt?: string;
   }> = [];
   const settingSeed = [
@@ -55,33 +52,17 @@ async function seedIfEmpty(email: string) {
     { id: crypto.randomUUID(), category: "MAPPING", code: "MAP-EAM-FA", name: "KC EAM → Fixed Asset", description: "asset_class → GL account, cost_center → branch", status: "Needs Review", metadata: JSON.stringify({ source: "KC EAM", target: "GL" }), createdBy: email, createdAt: now, updatedAt: now },
     { id: crypto.randomUUID(), category: "MAPPING", code: "MAP-HR-GL", name: "KC HR → Payroll Journal", description: "department → cost center, gross_pay → debit", status: "Active", metadata: JSON.stringify({ source: "KC HR", target: "GL" }), createdBy: email, createdAt: now, updatedAt: now },
   ];
-  const statements = [
-    ...financialSeed.map((item) => env.DB.prepare(`
-      INSERT OR IGNORE INTO financial_records
-      (id, module, record_type, document_no, source_system, counterparty, description, amount, tax_amount, currency, status, due_date, period, metadata, created_by, approver, posted_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(item.id, item.module, item.recordType, item.documentNo, item.sourceSystem, item.counterparty, item.description, item.amount, item.taxAmount, item.currency, item.status, item.dueDate ?? null, item.period, item.metadata, item.createdBy, item.approver ?? null, item.postedAt ?? null, item.createdAt, item.updatedAt)),
-    ...settingSeed.map((item) => env.DB.prepare(`
-      INSERT OR IGNORE INTO settings (key, value, updated_by, updated_at) VALUES (?, ?, ?, ?)
-    `).bind(item.key, item.value, item.updatedBy, item.updatedAt)),
-    ...masterSeed.map((item) => env.DB.prepare(`
-      INSERT OR IGNORE INTO master_data
-      (id, category, code, name, description, status, metadata, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(item.id, item.category, item.code, item.name, item.description, item.status, item.metadata, item.createdBy, item.createdAt, item.updatedAt)),
-    env.DB.prepare(`
-      INSERT INTO audit_logs (record_id, action, actor_email, details, created_at)
-      SELECT NULL, 'SYSTEM_BOOTSTRAP', ?, 'Initialized KC Account production workspace', ?
-      WHERE NOT EXISTS (SELECT 1 FROM audit_logs WHERE action = 'SYSTEM_BOOTSTRAP')
-    `).bind(email, now),
-    env.DB.prepare(`
-      INSERT INTO settings (key, value, updated_by, updated_at) VALUES ('seed_version', '1', ?, ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at
-    `).bind(email, now),
-  ];
-
-  // One atomic D1 batch prevents partially seeded workspaces and concurrent first-load races.
-  await env.DB.batch(statements);
+  await db.transaction(async (tx) => {
+    // Serializes concurrent first requests without holding an application-level lock.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('kc-account-bootstrap'))`);
+    const [seedMarker] = await tx.select().from(settings).where(eq(settings.key, "seed_version")).limit(1);
+    if (seedMarker?.value === "1") return;
+    if (financialSeed.length) await tx.insert(financialRecords).values(financialSeed).onConflictDoNothing();
+    await tx.insert(settings).values(settingSeed).onConflictDoNothing({ target: settings.key });
+    await tx.insert(masterData).values(masterSeed).onConflictDoNothing({ target: masterData.id });
+    await tx.insert(auditLogs).values({ recordId: null, action: "SYSTEM_BOOTSTRAP", actorEmail: email, details: "Initialized KC Account production workspace", createdAt: now });
+    await tx.insert(settings).values({ key: "seed_version", value: "1", updatedBy: email, updatedAt: now }).onConflictDoUpdate({ target: settings.key, set: { value: "1", updatedBy: email, updatedAt: now } });
+  });
 }
 
 export async function GET() {
@@ -104,7 +85,7 @@ export async function GET() {
     const insights = buildFinanceInsights(records, masters, configMap, new Date(), integration.events);
     const connectors = integration.connectors.map((connector) => ({
       ...connector,
-      outboundTokenConfigured: typeof (env as unknown as Record<string, unknown>)[connectorSecretEnvKey(connector.key as ConnectorKey)] === "string" && String((env as unknown as Record<string, unknown>)[connectorSecretEnvKey(connector.key as ConnectorKey)]).trim().length > 0,
+      outboundTokenConfigured: Boolean(process.env[connectorSecretEnvKey(connector.key as ConnectorKey)]?.trim()),
       inboundEndpoint: `/api/integrations/${connector.key}`,
     }));
     return NextResponse.json(

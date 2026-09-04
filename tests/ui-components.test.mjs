@@ -36,7 +36,7 @@ async function readCssTree(directory) {
 }
 
 test("emits the catalog's animation and scrolling utilities", async () => {
-  const css = await readCssTree(path.join(root, "dist"));
+  const css = await readCssTree(path.join(root, ".next", "static"));
 
   assert.match(css, /--tw-enter-opacity/);
   assert.match(css, /scrollbar-width:\s*thin/);
@@ -325,13 +325,13 @@ test("export permission is granted only to finance roles that can export", async
   assert.doesNotMatch(source, /Viewer:\s*\[[^\]]*"export"/);
 });
 
-test("production seed is atomic, idempotent, and avoids oversized D1 inserts", async () => {
+test("production seed is atomic, idempotent, and PostgreSQL-safe", async () => {
   const source = await readFile(new URL("../app/api/records/route.ts", import.meta.url), "utf8");
-  assert.match(source, /await env\.DB\.batch\(statements\)/);
-  assert.match(source, /INSERT OR IGNORE INTO financial_records/);
-  assert.match(source, /INSERT OR IGNORE INTO master_data/);
+  assert.match(source, /db\.transaction/);
+  assert.match(source, /pg_advisory_xact_lock/);
+  assert.match(source, /onConflictDoNothing/);
   assert.match(source, /seed_version/);
-  assert.doesNotMatch(source, /db\.insert\(financialRecords\)\.values\(financialSeed\)/);
+  assert.doesNotMatch(source, /env\.DB/);
 });
 
 test("client handles empty and malformed responses for every API action", async () => {
