@@ -1,6 +1,7 @@
 import { and, desc, eq, sql } from "drizzle-orm";
+import { timingSafeEqual } from "node:crypto";
 import { getDb } from "@/db";
-import { auditLogs, financialRecords, integrationConnectors, integrationEvents } from "@/db/schema";
+import { auditLogs, financialRecords, integrationConnectors, integrationConnectorScopes, integrationEvents } from "@/db/schema";
 import {
   CONNECTORS,
   CONNECTOR_KEYS,
@@ -76,7 +77,21 @@ export async function authenticateConnector(system: ConnectorKey, request: Reque
   const tokenHash = await sha256(token);
   const db = getDb();
   const [connector] = await db.select().from(integrationConnectors).where(eq(integrationConnectors.key, system)).limit(1);
-  return Boolean(connector?.apiKeyHash && connector.apiKeyHash === tokenHash && connector.status !== "Disabled");
+  if (!connector?.apiKeyHash || connector.status === "Disabled") return false;
+  const expected = Buffer.from(connector.apiKeyHash, "hex");
+  const received = Buffer.from(tokenHash, "hex");
+  return expected.length === received.length && timingSafeEqual(expected, received);
+}
+
+export async function authorizeAccountingConnector(system: ConnectorKey, request: Request, tenantId: string, companyId: string) {
+  if (!await authenticateConnector(system, request)) return false;
+  const [scope] = await getDb().select({ connectorKey: integrationConnectorScopes.connectorKey }).from(integrationConnectorScopes).where(and(
+    eq(integrationConnectorScopes.connectorKey, system),
+    eq(integrationConnectorScopes.tenantId, tenantId),
+    eq(integrationConnectorScopes.companyId, companyId),
+    eq(integrationConnectorScopes.isActive, true),
+  )).limit(1);
+  return Boolean(scope);
 }
 
 export type ProcessEventResult = {

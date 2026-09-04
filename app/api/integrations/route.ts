@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
@@ -25,7 +24,7 @@ export const dynamic = "force-dynamic";
 const jsonError = (message: string, status = 400) => NextResponse.json({ error: message }, { status });
 
 function outboundToken(system: ConnectorKey) {
-  const value = (env as unknown as Record<string, unknown>)[connectorSecretEnvKey(system)];
+  const value = process.env[connectorSecretEnvKey(system)];
   return typeof value === "string" ? value.trim() : "";
 }
 
@@ -36,7 +35,7 @@ async function currentConnector(system: ConnectorKey) {
   return connector;
 }
 
-function externalHeaders(system: ConnectorKey) {
+function externalHeaders(system: ConnectorKey): Record<string, string> {
   const token = outboundToken(system);
   return token ? { accept: "application/json", authorization: `Bearer ${token}` } : { accept: "application/json" };
 }
@@ -150,4 +149,3 @@ export async function POST(request: Request) {
     return jsonError(message, 502);
   }
 }
-

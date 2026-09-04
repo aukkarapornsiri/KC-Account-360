@@ -15,18 +15,23 @@ const PERCENT_ENCODED_UTF8 = "percent-encoded-utf-8";
 const SIGN_IN_PATH = "/signin-with-chatgpt";
 const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
+const PROXY_EMAIL_HEADER = "x-auth-request-email";
+const PROXY_NAME_HEADER = "x-auth-request-preferred-username";
+
+function trustedProxyAuthEnabled() {
+  return process.env.AUTH_TRUST_PROXY === "true";
+}
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
-  const email = requestHeaders.get(USER_EMAIL_HEADER);
+  const email = requestHeaders.get(USER_EMAIL_HEADER) || (trustedProxyAuthEnabled() ? requestHeaders.get(PROXY_EMAIL_HEADER) : null);
   if (!email) return null;
 
   const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get(USER_FULL_NAME_ENCODING_HEADER) === PERCENT_ENCODED_UTF8
-      ? safeDecodeURIComponent(encodedFullName)
-      : null;
+  const proxyName = trustedProxyAuthEnabled() ? requestHeaders.get(PROXY_NAME_HEADER) : null;
+  const fullName = encodedFullName && requestHeaders.get(USER_FULL_NAME_ENCODING_HEADER) === PERCENT_ENCODED_UTF8
+    ? safeDecodeURIComponent(encodedFullName)
+    : proxyName;
 
   return {
     displayName: fullName ?? email,
@@ -46,11 +51,13 @@ export async function requireChatGPTUser(
 
 export function chatGPTSignInPath(returnTo: string): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
+  if (trustedProxyAuthEnabled()) return `/oauth2/start?rd=${encodeURIComponent(safeReturnTo)}`;
   return `${SIGN_IN_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
 
 export function chatGPTSignOutPath(returnTo = "/"): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
+  if (trustedProxyAuthEnabled()) return `/oauth2/sign_out?rd=${encodeURIComponent(safeReturnTo)}`;
   return `${SIGN_OUT_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
 
@@ -74,6 +81,7 @@ function isReservedAuthPath(pathname: string): boolean {
     pathname === SIGN_IN_PATH ||
     pathname === SIGN_OUT_PATH ||
     pathname === CALLBACK_PATH
+    || pathname.startsWith("/oauth2/")
   );
 }
 
