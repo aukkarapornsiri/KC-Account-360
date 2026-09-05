@@ -378,9 +378,9 @@ test("language switch supports Thai and English and remembers the selection", as
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(source, /<LanguageMenu language=\{language\} onChange=\{changeLanguage\}/);
   assert.match(menu, /<Globe2 \/>/);
-  assert.match(menu, /<ChevronDown className="language-menu-chevron" \/>/);
-  assert.match(menu, /<DropdownMenuRadioItem value="th"/);
-  assert.match(menu, /<DropdownMenuRadioItem value="en"/);
+  assert.match(menu, /nextLanguage = language === "th" \? "en" : "th"/);
+  assert.match(menu, /onClick=\{\(\) => onChange\(nextLanguage\)\}/);
+  assert.doesNotMatch(menu, /DropdownMenu/);
   assert.match(source, /kc-account-language/);
   assert.match(source, /document\.documentElement\.lang/);
   assert.match(source, /LanguageContext\.Provider/);
