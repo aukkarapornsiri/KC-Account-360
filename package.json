@@ -19,7 +19,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:bootstrap": "node scripts/bootstrap-accounting.mjs",
-    "backup": "bash scripts/backup-on-prem.sh"
+    "backup": "bash scripts/backup-on-prem.sh",
+    "db:seed:qa": "node scripts/seed-qa-fixtures.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

@@ -8,8 +8,8 @@ export const metadata: Metadata = {
     "codex-preview": "development",
   },
   icons: {
-    icon: "/account360-logo.png",
-    shortcut: "/account360-logo.png",
+    icon: "/kc-account-360-app-logo.png",
+    shortcut: "/kc-account-360-app-logo.png",
   },
 };
 

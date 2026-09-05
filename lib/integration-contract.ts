@@ -61,24 +61,68 @@ export type InboundEvent = z.infer<typeof inboundEventSchema>;
 
 const EVENT_TARGETS: Record<ConnectorKey, Record<string, { module: string; recordType: string; status: string }>> = {
   cuto: {
-    sales_invoice: { module: "AR", recordType: "Invoice", status: "Pending Approval" },
-    credit_note: { module: "AR", recordType: "Credit Note", status: "Pending Approval" },
+    sales_invoice: {
+      module: "AR",
+      recordType: "Invoice",
+      status: "Pending Approval",
+    },
+    credit_note: {
+      module: "AR",
+      recordType: "Credit Note",
+      status: "Pending Approval",
+    },
     receipt: { module: "CASH", recordType: "Receipt", status: "Unreconciled" },
   },
   tory: {
-    vendor_bill: { module: "AP", recordType: "Vendor Bill", status: "Pending Approval" },
-    goods_receipt: { module: "AP", recordType: "Goods Receipt", status: "Pending Approval" },
-    inventory_adjustment: { module: "GL", recordType: "Inventory Journal", status: "Draft" },
+    vendor_bill: {
+      module: "AP",
+      recordType: "Vendor Bill",
+      status: "Pending Approval",
+    },
+    goods_receipt: {
+      module: "AP",
+      recordType: "Goods Receipt",
+      status: "Pending Approval",
+    },
+    inventory_adjustment: {
+      module: "GL",
+      recordType: "Inventory Journal",
+      status: "Draft",
+    },
   },
   eam: {
-    asset_capitalization: { module: "GL", recordType: "Asset Capitalization", status: "Draft" },
-    asset_disposal: { module: "GL", recordType: "Asset Disposal", status: "Draft" },
-    depreciation: { module: "GL", recordType: "Depreciation Journal", status: "Draft" },
+    asset_capitalization: {
+      module: "GL",
+      recordType: "Asset Capitalization",
+      status: "Draft",
+    },
+    asset_disposal: {
+      module: "GL",
+      recordType: "Asset Disposal",
+      status: "Draft",
+    },
+    depreciation: {
+      module: "GL",
+      recordType: "Depreciation Journal",
+      status: "Draft",
+    },
   },
   hr: {
-    payroll_journal: { module: "GL", recordType: "Payroll Journal", status: "Draft" },
-    payroll_payable: { module: "AP", recordType: "Payroll Payable", status: "Pending Approval" },
-    payroll_tax: { module: "TAX", recordType: "Payroll Tax", status: "Preparing" },
+    payroll_journal: {
+      module: "GL",
+      recordType: "Payroll Journal",
+      status: "Draft",
+    },
+    payroll_payable: {
+      module: "AP",
+      recordType: "Payroll Payable",
+      status: "Pending Approval",
+    },
+    payroll_tax: {
+      module: "TAX",
+      recordType: "Payroll Tax",
+      status: "Preparing",
+    },
   },
 };
 
@@ -104,7 +148,12 @@ export function mapInboundEvent(system: ConnectorKey, event: InboundEvent) {
     period: event.period,
     metadata: JSON.stringify({
       ...event.metadata,
-      integration: { source: system, eventId: event.event_id, occurredAt: event.occurred_at },
+      integration: {
+        source: system,
+        eventId: event.event_id,
+        occurredAt: event.occurred_at,
+        sourceDocumentNo: event.document_no,
+      },
     }),
   };
 }
@@ -118,16 +167,19 @@ export function validateExternalBaseUrl(value: string) {
   if (url.protocol !== "https:") throw new Error("Endpoint ต้องใช้ HTTPS");
   if (url.username || url.password) throw new Error("ห้ามฝัง Username หรือ Password ใน Endpoint");
   const host = url.hostname.toLowerCase();
-  const allowedHosts = new Set((process.env.KC_INTEGRATION_ALLOWED_HOSTS || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean));
+  const allowedHosts = new Set(
+    (process.env.KC_INTEGRATION_ALLOWED_HOSTS || "")
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean),
+  );
   const normalizedHost = host.replace(/^\[/, "").replace(/\]$/, "");
   const blockedHost = normalizedHost === "localhost" || normalizedHost.endsWith(".local") || normalizedHost.endsWith(".internal") || normalizedHost === "::1" || normalizedHost.startsWith("fc") || normalizedHost.startsWith("fd") || normalizedHost.startsWith("fe80:") || normalizedHost === "0.0.0.0";
-  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)?.slice(1).map(Number);
-  const privateIpv4 = ipv4 && (
-    ipv4.some((part) => part > 255) || ipv4[0] === 10 || ipv4[0] === 127 ||
-    (ipv4[0] === 169 && ipv4[1] === 254) ||
-    (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31) ||
-    (ipv4[0] === 192 && ipv4[1] === 168)
-  );
+  const ipv4 = host
+    .match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+    ?.slice(1)
+    .map(Number);
+  const privateIpv4 = ipv4 && (ipv4.some((part) => part > 255) || ipv4[0] === 10 || ipv4[0] === 127 || (ipv4[0] === 169 && ipv4[1] === 254) || (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31) || (ipv4[0] === 192 && ipv4[1] === 168));
   if ((blockedHost || privateIpv4) && !allowedHosts.has(host)) throw new Error("Endpoint ต้องเป็น Public HTTPS URL ที่ปลอดภัย หรือ Host ที่อนุญาตไว้");
   url.pathname = url.pathname.replace(/\/$/, "");
   url.search = "";
