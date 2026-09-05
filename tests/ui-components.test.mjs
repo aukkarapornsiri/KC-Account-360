@@ -167,6 +167,25 @@ test("protects editable workflows and administrator continuity", async () => {
   assert.match(api, /ระบบต้องมี Admin ที่ใช้งานอยู่อย่างน้อย 1 คน/);
 });
 
+test("renders the complete user and permission management workspace", async () => {
+  const source = await readFile(new URL("../app/kc-account-app.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(source, /function UserPermissionWorkspace/);
+  assert.match(source, /active === "users" \? <UserPermissionWorkspace/);
+  for (const label of ["User Management", "Roles & Permissions", "Dashboard Visibility", "Approval Workflow", "Audit Log"]) {
+    assert.match(source, new RegExp(label.replace("&", "\\&")));
+  }
+  assert.match(source, /Search users/);
+  assert.match(source, /Create User/);
+  assert.match(source, /Data Scope/);
+  assert.match(source, /action: editing \? "update_master" : "create_master"/);
+  assert.match(source, /action: "toggle_master"/);
+  assert.match(css, /\.user-summary-grid\s*\{/);
+  assert.match(css, /\.user-workspace-tabs\s*\{/);
+  assert.match(css, /\.user-management-table\s*\{/);
+});
+
 test("allows administrators to edit connector endpoints and matches email case-insensitively", async () => {
   const source = await readFile(new URL("../app/kc-account-app.tsx", import.meta.url), "utf8");
   const access = await readFile(new URL("../app/api/access.ts", import.meta.url), "utf8");
