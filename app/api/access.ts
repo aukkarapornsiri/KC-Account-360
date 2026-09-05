@@ -2,13 +2,13 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { masterData, userCompanyRoles } from "@/db/schema";
 
-export type Permission = "read" | "create" | "post" | "approve" | "reconcile" | "export" | "manage_master" | "manage_users" | "manage_settings";
+export type Permission = "read" | "create" | "post" | "approve" | "reconcile" | "close_period" | "review_ai" | "export" | "manage_master" | "manage_users" | "manage_settings" | "manage_integrations";
 export type Access = { role: "Admin" | "Accountant" | "Approver" | "Viewer"; permissions: Permission[] };
 
 const ROLE_PERMISSIONS: Record<Access["role"], Permission[]> = {
-  Admin: ["read", "create", "post", "approve", "reconcile", "export", "manage_master", "manage_users", "manage_settings"],
-  Accountant: ["read", "create", "post", "reconcile", "export", "manage_master"],
-  Approver: ["read", "approve"],
+  Admin: ["read", "create", "post", "approve", "reconcile", "close_period", "review_ai", "export", "manage_master", "manage_users", "manage_settings", "manage_integrations"],
+  Accountant: ["read", "create", "post", "reconcile", "close_period", "review_ai", "export", "manage_master"],
+  Approver: ["read", "approve", "review_ai"],
   Viewer: ["read"],
 };
 

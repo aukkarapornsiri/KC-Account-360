@@ -15,13 +15,16 @@
 4. สำรองฐานข้อมูลก่อน migration ทุกครั้ง
 5. `docker compose up -d`
 6. ตรวจ `docker compose ps`, migration service exit 0 และ `/api/health`
-7. Smoke test Login, AP/AR document, attachment, approval และ export
+7. เรียก `npm run db:bootstrap` หนึ่งครั้งด้วยค่าจาก Secret Manager เพื่อสร้าง Tenant, Company, 12 Periods, COA เริ่มต้น และ Admin (คำสั่งเป็น idempotent)
+8. Smoke test Login, AP/AR document, attachment, approval, posting, reversal, closing, report, AI review และ export
 
 ## Backup
 
 - PostgreSQL: encrypted `pg_dump --format=custom` ทุกวันและ WAL/PITR ตาม RPO ขององค์กร
 - Document volume: snapshot พร้อม PostgreSQL backup set เดียวกัน
 - เก็บอย่างน้อยหนึ่งสำเนานอกเครื่อง และทดสอบ restore ตามรอบ
+- ใช้ `npm run backup` เพื่อสร้าง custom-format dump พร้อม SHA-256 manifest
+- ทดสอบด้วย `KC_RESTORE_DATABASE_URL=... scripts/verify-restore.sh /path/to/backup.dump` บนฐานว่างที่แยกจาก Production
 - ห้ามนำ dump หรือ attachment Production เข้า Public Repository
 
 ## Rollback
