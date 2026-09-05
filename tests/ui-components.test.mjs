@@ -109,6 +109,8 @@ test("provides the KC EAM-inspired System Control settings workspace", async () 
   const source = await readFile(new URL("../app/kc-account-app.tsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../app/api/records/route.ts", import.meta.url), "utf8");
   const logoApi = await readFile(new URL("../app/api/branding/logo/route.ts", import.meta.url), "utf8");
+  const signIn = await readFile(new URL("../app/signin-view.tsx", import.meta.url), "utf8");
+  const hostedBranding = await readFile(new URL("../lib/hosted-branding.ts", import.meta.url), "utf8");
 
   assert.match(source, /className="system-control-tabs"/);
   assert.match(source, /การตั้งค่าระบบ/);
@@ -118,6 +120,13 @@ test("provides the KC EAM-inspired System Control settings workspace", async () 
   assert.match(api, /body\.action === "update_settings"/);
   assert.match(logoApi, /brand_logo_key/);
   assert.match(logoApi, /file\.size > 1024 \* 1024/);
+  assert.match(source, /onBrandLogoChange/);
+  assert.match(source, /brandLogoUrl\(data\?\.settings\.brand_logo_key\)/);
+  assert.match(source, /brandLogoUrl\(settings\.brand_logo_key\)/);
+  assert.match(signIn, /src="\/api\/branding\/logo"/);
+  assert.match(hostedBranding, /env\.BUCKET\.put/);
+  assert.match(hostedBranding, /ON CONFLICT\(key\) DO UPDATE/);
+  assert.doesNotMatch(source, /src="\/account360-logo\.png"/);
 });
 
 test("exposes the complete accounting, integration, and control navigation", async () => {
