@@ -55,6 +55,7 @@ type AccountingDocumentMeta = {
 
 const LanguageContext = createContext<Language>("th");
 const useLanguage = () => { const language = useContext(LanguageContext); return { language, tr: (thai: string, english: string) => language === "th" ? thai : english }; };
+const brandLogoUrl = (key?: string) => key ? `/api/branding/logo?v=${encodeURIComponent(key)}` : "/api/branding/logo";
 
 const NAV: NavItem[] = [
   { id: "dashboard", label: "ภาพรวม", helper: "Executive dashboard", icon: LayoutDashboard, phase: "core" },
@@ -260,7 +261,7 @@ function KCNavigation({ active, data, permissions, selectPage }: { active: strin
   const [accountingOpen, setAccountingOpen] = useState(true);
   const [operationsOpen, setOperationsOpen] = useState(OPERATIONS_NAV.some((item) => item.id === active));
   const [systemOpen, setSystemOpen] = useState(SYSTEM_CONTROL_PAGES.includes(active));
-  const logoSrc = data?.settings.brand_logo_key && !data.settings.brand_logo_key.includes("-365_") ? `/api/branding/logo?v=${encodeURIComponent(data.settings.brand_logo_key)}` : "/account360-logo.png";
+  const logoSrc = brandLogoUrl(data?.settings.brand_logo_key);
   const goTo = (id: string) => { selectPage(id); setOpenMobile(false); };
 
   return <>
@@ -447,7 +448,7 @@ export default function KCAccountApp({ initialUser, signOutHref }: { initialUser
           {systemControlActive && data && <SystemControlTabs active={active} onNavigate={selectPage} permissions={permissions} />}
           {!loading && data && ["ar", "ap"].includes(active) && <DocumentWorkflowPanel module={active.toUpperCase()} records={filtered} canCreate={permissions.includes("create")} onCreate={(type) => { setCreateDocumentType(type); setCreateOpen(true); }} />}
           {active !== "settings" && <div className="page-head"><div><p className="eyebrow">{displayNav.helper}</p><h1>{displayNav.label}</h1></div><div className="head-actions">{showSearch && <div className="search-box"><Search /><Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={language === "th" ? "ค้นหาเอกสาร คู่ค้า หรือสถานะ" : "Search documents, counterparties, or status"} aria-label={language === "th" ? "ค้นหา" : "Search"} /></div>}{showExport && <Button variant="outline" onClick={() => window.open(`/api/export?module=${nav.module || "ALL"}`, "_blank")}><Download />{language === "th" ? "ส่งออก CSV" : "Export CSV"}</Button>}{showCreate && <Button onClick={() => { setCreateDocumentType(null); setCreateOpen(true); }}><Plus />{active === "ar" ? language === "th" ? "สร้างเอกสารขาย" : "Create sales document" : active === "ap" ? language === "th" ? "สร้างเอกสารซื้อ" : "Create purchase document" : language === "th" ? "สร้างรายการ" : "Create entry"}</Button>}</div></div>}
-          {loading ? <div className="loading-panel"><Loader2 className="spin" /><p>{language === "th" ? "กำลังโหลดข้อมูลบัญชี..." : "Loading accounting data..."}</p></div> : !data ? <div className="empty-panel">{language === "th" ? "ไม่สามารถโหลดข้อมูลได้" : "Unable to load data"} <Button onClick={loadData}>{language === "th" ? "ลองใหม่" : "Try again"}</Button></div> : active === "dashboard" ? <Dashboard data={data} onNavigate={selectPage} /> : active === "ai" ? <AIAdvisor insights={data.insights} onNavigate={selectPage} /> : active === "settings" ? <SettingsView data={data} working={working} mutate={mutate} canManage={permissions.includes("manage_settings")} preferences={preferences} savePreferences={savePreferences} /> : active === "audit" ? <AuditPage logs={data.audit} /> : integrationPages.includes(active) ? <IntegrationView active={active} data={data} working={working} action={mutateIntegration} permissions={permissions} onNavigate={selectPage} /> : active === "mapping" ? <div className="integration-workspace"><IntegrationTabs active={active} onNavigate={selectPage} /><MasterView active={active} data={data} working={working} mutate={mutate} canManage={permissions.includes("manage_master")} /></div> : active === "reconciliation" ? <div className="integration-workspace"><IntegrationTabs active={active} onNavigate={selectPage} /><ModuleView active={active} records={filtered} data={data} working={working} mutate={mutate} onDetail={setDetail} onEdit={setEditRecord} onUpload={(record) => { setUploadRecord(record); fileRef.current?.click(); }} permissions={permissions} /></div> : active === "reports" ? <FinancialReportsView records={filtered} data={data} working={working} mutate={mutate} onDetail={setDetail} onEdit={setEditRecord} onUpload={(record) => { setUploadRecord(record); fileRef.current?.click(); }} permissions={permissions} /> : masterPages.includes(active) ? <MasterView active={active} data={data} working={working} mutate={mutate} canManage={active === "users" ? permissions.includes("manage_users") : permissions.includes("manage_master")} /> : <ModuleView active={active} records={filtered} data={data} working={working} mutate={mutate} onDetail={setDetail} onEdit={setEditRecord} onUpload={(record) => { setUploadRecord(record); fileRef.current?.click(); }} permissions={permissions} />}
+          {loading ? <div className="loading-panel"><Loader2 className="spin" /><p>{language === "th" ? "กำลังโหลดข้อมูลบัญชี..." : "Loading accounting data..."}</p></div> : !data ? <div className="empty-panel">{language === "th" ? "ไม่สามารถโหลดข้อมูลได้" : "Unable to load data"} <Button onClick={loadData}>{language === "th" ? "ลองใหม่" : "Try again"}</Button></div> : active === "dashboard" ? <Dashboard data={data} onNavigate={selectPage} /> : active === "ai" ? <AIAdvisor insights={data.insights} onNavigate={selectPage} /> : active === "settings" ? <SettingsView data={data} working={working} mutate={mutate} canManage={permissions.includes("manage_settings")} preferences={preferences} savePreferences={savePreferences} onBrandLogoChange={(key) => setData((current) => current ? { ...current, settings: { ...current.settings, brand_logo_key: key } } : current)} /> : active === "audit" ? <AuditPage logs={data.audit} /> : integrationPages.includes(active) ? <IntegrationView active={active} data={data} working={working} action={mutateIntegration} permissions={permissions} onNavigate={selectPage} /> : active === "mapping" ? <div className="integration-workspace"><IntegrationTabs active={active} onNavigate={selectPage} /><MasterView active={active} data={data} working={working} mutate={mutate} canManage={permissions.includes("manage_master")} /></div> : active === "reconciliation" ? <div className="integration-workspace"><IntegrationTabs active={active} onNavigate={selectPage} /><ModuleView active={active} records={filtered} data={data} working={working} mutate={mutate} onDetail={setDetail} onEdit={setEditRecord} onUpload={(record) => { setUploadRecord(record); fileRef.current?.click(); }} permissions={permissions} /></div> : active === "reports" ? <FinancialReportsView records={filtered} data={data} working={working} mutate={mutate} onDetail={setDetail} onEdit={setEditRecord} onUpload={(record) => { setUploadRecord(record); fileRef.current?.click(); }} permissions={permissions} /> : masterPages.includes(active) ? <MasterView active={active} data={data} working={working} mutate={mutate} canManage={active === "users" ? permissions.includes("manage_users") : permissions.includes("manage_master")} /> : <ModuleView active={active} records={filtered} data={data} working={working} mutate={mutate} onDetail={setDetail} onEdit={setEditRecord} onUpload={(record) => { setUploadRecord(record); fileRef.current?.click(); }} permissions={permissions} />}
         </section>
 
       <input ref={fileRef} className="sr-only" type="file" accept=".pdf,.png,.jpg,.jpeg,.csv,.xlsx,.docx" onChange={(e) => void upload(e.target.files?.[0])} />
@@ -698,7 +699,7 @@ function AuditPage({ logs }: { logs: AuditItem[] }) {
   return <section className="panel table-panel"><div className="panel-head"><div><p className="eyebrow">CONTROL & COMPLIANCE</p><h2>Audit Log</h2></div><Badge variant="outline">{tr(`ล่าสุด ${logs.length} รายการ`, `${logs.length} recent entries`)}</Badge></div><Table><TableHeader><TableRow><TableHead>{tr("เวลา", "Time")}</TableHead><TableHead>{tr("การดำเนินการ", "Action")}</TableHead><TableHead>{tr("รายละเอียด", "Details")}</TableHead><TableHead>{tr("ผู้ดำเนินการ", "Actor")}</TableHead><TableHead>Record ID</TableHead></TableRow></TableHeader><TableBody>{logs.map((log) => <TableRow key={log.id}><TableCell>{dateText(log.createdAt)}</TableCell><TableCell><strong>{log.action.replaceAll("_", " ")}</strong></TableCell><TableCell>{log.details}</TableCell><TableCell>{log.actorEmail}</TableCell><TableCell><small>{log.recordId || "SYSTEM"}</small></TableCell></TableRow>)}</TableBody></Table></section>;
 }
 
-function SettingsView({ data, working, mutate, canManage, preferences, savePreferences }: { data: AppData; working: boolean; mutate: (p: Record<string, unknown>, s: string) => Promise<boolean>; canManage: boolean; preferences: UserPreferences; savePreferences: (updates: Partial<UserPreferences>) => Promise<UserPreferences> }) {
+function SettingsView({ data, working, mutate, canManage, preferences, savePreferences, onBrandLogoChange }: { data: AppData; working: boolean; mutate: (p: Record<string, unknown>, s: string) => Promise<boolean>; canManage: boolean; preferences: UserPreferences; savePreferences: (updates: Partial<UserPreferences>) => Promise<UserPreferences>; onBrandLogoChange: (key: string) => void }) {
   const { tr } = useLanguage();
   const defaultPrimary = "#0AADA9"; const defaultControl = "#172033";
   const [workspaceName, setWorkspaceName] = useState(data.settings.company_name || "KC Account 360");
@@ -713,7 +714,7 @@ function SettingsView({ data, working, mutate, canManage, preferences, savePrefe
   const [pageWidth, setPageWidth] = useState<UserPreferences["pageWidth"]>(preferences.pageWidth);
   const [dateFormat, setDateFormat] = useState<UserPreferences["dateFormat"]>(preferences.dateFormat);
   const [preferenceBusy, setPreferenceBusy] = useState(false);
-  const [logoSrc, setLogoSrc] = useState(data.settings.brand_logo_key && !data.settings.brand_logo_key.includes("-365_") ? `/api/branding/logo?v=${encodeURIComponent(data.settings.brand_logo_key)}` : "/account360-logo.png");
+  const logoSrc = brandLogoUrl(data.settings.brand_logo_key);
   const [logoBusy, setLogoBusy] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const closing = data.records.filter((r) => r.module === "CLOSING"); const complete = closing.filter((r) => r.status === "Completed").length;
@@ -730,18 +731,17 @@ function SettingsView({ data, working, mutate, canManage, preferences, savePrefe
     if (!["image/png", "image/jpeg"].includes(file.type) || file.size > 1024 * 1024) { toast.error(tr("รองรับ PNG หรือ JPG ขนาดไม่เกิน 1 MB", "Use a PNG or JPG file up to 1 MB")); return; }
     setLogoBusy(true);
     try {
-      if (data.settings.preview_mode === "true") { setLogoSrc(URL.createObjectURL(file)); toast.success(tr("แสดง Logo ใน Preview แล้ว", "Logo preview updated")); return; }
       const form = new FormData(); form.set("file", file);
       const response = await fetch("/api/branding/logo", { method: "POST", body: form });
       const body = await readApiJson<{ ok: boolean; key: string }>(response);
-      setLogoSrc(`/api/branding/logo?v=${encodeURIComponent(body.key)}`); toast.success(tr("อัปโหลด Brand Logo แล้ว", "Brand logo uploaded"));
+      onBrandLogoChange(body.key); toast.success(tr("อัปโหลดและใช้ Brand Logo ทุกจุดแล้ว", "Brand logo uploaded and applied everywhere"));
     } catch (error) { toast.error(error instanceof Error ? error.message : tr("อัปโหลด Logo ไม่สำเร็จ", "Logo upload failed")); }
     finally { setLogoBusy(false); }
   }
 
   async function resetLogo() {
     setLogoBusy(true);
-    try { if (data.settings.preview_mode === "true") { setLogoSrc("/account360-logo.png"); toast.success(tr("กลับไปใช้ Logo มาตรฐานแล้ว", "Default logo restored")); return; } const response = await fetch("/api/branding/logo", { method: "DELETE" }); await readApiJson<{ ok: boolean }>(response); setLogoSrc("/account360-logo.png"); toast.success(tr("กลับไปใช้ Logo มาตรฐานแล้ว", "Default logo restored")); }
+    try { const response = await fetch("/api/branding/logo", { method: "DELETE" }); await readApiJson<{ ok: boolean }>(response); onBrandLogoChange(""); toast.success(tr("กลับไปใช้ Logo มาตรฐานทุกจุดแล้ว", "Default logo restored everywhere")); }
     catch (error) { toast.error(error instanceof Error ? error.message : tr("คืนค่า Logo ไม่สำเร็จ", "Could not restore the logo")); }
     finally { setLogoBusy(false); }
   }
@@ -827,7 +827,7 @@ function AccountingDocumentDialog({ open, onOpenChange, moduleKey, initialType, 
   const withholdingTax = subtotal * whtRate / 100;
   const netTotal = subtotal + vat - withholdingTax;
   const vendorOptions = [...new Set(existingVendors)].sort();
-  const brandLogo = settings.brand_logo_key && !settings.brand_logo_key.includes("-365_") ? `/api/branding/logo?v=${encodeURIComponent(settings.brand_logo_key)}` : "/account360-logo.png";
+  const brandLogo = brandLogoUrl(settings.brand_logo_key);
   const referenceGuide: Record<string, [string, string]> = {
     "Purchase Order": ["เลขที่ PR", "PR number"], "Purchase Deposit": ["เลขที่ PO", "PO number"], "Goods Receipt": ["เลขที่ PO", "PO number"],
     "Purchase Invoice": ["เลขที่ PO หรือใบรับของ", "PO or goods receipt number"], "Purchase Billing Receipt": ["เลขที่ใบแจ้งหนี้ซื้อ", "Purchase invoice number"],
@@ -934,7 +934,7 @@ function DocumentPreviewSheet({ record, settings }: { record: RecordItem; settin
   const lines = meta.lineItems?.length ? meta.lineItems : [{ code: "", description: record.description, unit: "รายการ", quantity: 1, unitPrice: record.amount / 100, discount: 0 }];
   const subtotal = (meta.subtotal ?? record.amount) / 100; const vat = record.taxAmount / 100;
   const withholding = (meta.withholdingTax ?? 0) / 100; const net = (meta.netTotal ?? record.amount + record.taxAmount) / 100;
-  const logoSrc = settings.brand_logo_key && !settings.brand_logo_key.includes("-365_") ? `/api/branding/logo?v=${encodeURIComponent(settings.brand_logo_key)}` : "/account360-logo.png";
+  const logoSrc = brandLogoUrl(settings.brand_logo_key);
   return <article className="document-preview-sheet">
     <header><div className="preview-company"><Image src={logoSrc} width={2172} height={724} alt="Account 360" unoptimized /><strong>{settings.company_name || "KC Account 360"}</strong><span>{settings.company_address || tr("กรุณากำหนดที่อยู่บริษัท", "Configure company address")}</span><span>{settings.company_website || "—"} · Tax ID {settings.tax_id || "—"}</span></div><div className="preview-document-title"><h2>{tr(definition?.th || record.recordType, definition?.en || record.recordType)}</h2><dl><div><dt>{tr("เลขที่", "Document no.")}</dt><dd>{record.documentNo}</dd></div><div><dt>{tr("วันที่", "Issue date")}</dt><dd>{meta.issueDate || dateText(record.createdAt)}</dd></div><div><dt>{tr("ผู้จัดทำ", "Prepared by")}</dt><dd>{meta.preparedBy || record.createdBy}</dd></div></dl></div></header>
     <section className="preview-party"><h3>{tr(record.module === "AR" ? "ลูกค้า" : "ผู้ขาย / เจ้าหนี้", record.module === "AR" ? "Customer" : "Vendor / Payable")}</h3><strong>{record.counterparty || "—"}</strong><span>{meta.counterpartyAddress || "—"}</span><span>Tax ID {meta.counterpartyTaxId || "—"}{meta.contactName ? ` · ${meta.contactName}` : ""}</span><dl><div><dt>{tr("อ้างอิง", "Reference")}</dt><dd>{meta.referenceDocumentNo || meta.linkedDocumentNo || "—"}</dd></div>{record.recordType === "Purchase Invoice" && <div><dt>{tr("Invoice ผู้ขาย", "Vendor invoice")}</dt><dd>{meta.vendorInvoiceNo || "—"}</dd></div>}{["Goods Receipt", "Delivery Note"].includes(record.recordType) && <div><dt>{tr(record.recordType === "Goods Receipt" ? "ลำดับการรับของ" : "ลำดับการส่งของ", record.recordType === "Goods Receipt" ? "Receiving sequence" : "Delivery sequence")}</dt><dd>{meta.documentTiming === "after_invoice" ? tr("หลังออกใบแจ้งหนี้", "After invoice") : tr("ก่อนออกใบแจ้งหนี้", "Before invoice")}</dd></div>}<div><dt>{tr("โครงการ", "Project")}</dt><dd>{meta.projectName || "—"}</dd></div><div><dt>{tr("ครบกำหนด", "Due date")}</dt><dd>{record.dueDate || "—"}</dd></div></dl></section>
