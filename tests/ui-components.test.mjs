@@ -83,6 +83,8 @@ test("uses the supplied KAI-COM robot for every rendered AI logo", async () => {
   assert.doesNotMatch(source, /<BrainCircuit \/>/);
   assert.match(css, /\.ai-robot-icon\.sidebar/);
   assert.match(css, /\.recommendation \.recommendation-icon/);
+  assert.match(css, /\.ai-orb\s*\{[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s);
+  assert.doesNotMatch(css, /\.ai-orb\s*\{[^}]*background:\s*(?:var\(--kc-gradient\)|linear-gradient)/s);
 });
 
 test("provides the KC EAM-inspired System Control settings workspace", async () => {
