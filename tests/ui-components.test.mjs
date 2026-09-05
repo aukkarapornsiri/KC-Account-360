@@ -87,6 +87,24 @@ test("uses the supplied KAI-COM robot for every rendered AI logo", async () => {
   assert.doesNotMatch(css, /\.ai-orb\s*\{[^}]*background:\s*(?:var\(--kc-gradient\)|linear-gradient)/s);
 });
 
+test("provides global command, role task center, and persistent saved views", async () => {
+  const source = await readFile(new URL("../app/kc-account-app.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const savedViewsApi = await readFile(new URL("../app/api/saved-views/route.ts", import.meta.url), "utf8");
+
+  assert.match(source, /function CommandCenter/);
+  assert.match(source, /event\.metaKey \|\| event\.ctrlKey/);
+  assert.match(source, /className="global-command-trigger"/);
+  assert.match(source, /ROLE-BASED TASK CENTER/);
+  assert.match(source, /\/api\/saved-views/);
+  assert.match(source, /บันทึกมุมมองส่วนตัว/);
+  assert.match(savedViewsApi, /userSavedViews/);
+  assert.match(savedViewsApi, /SAVE_PERSONAL_VIEW/);
+  assert.match(savedViewsApi, /eq\(userSavedViews\.userId, userId\)/);
+  assert.match(css, /\.command-center\s*\{/);
+  assert.match(css, /\.task-center-panel\s*\{/);
+});
+
 test("provides the KC EAM-inspired System Control settings workspace", async () => {
   const source = await readFile(new URL("../app/kc-account-app.tsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../app/api/records/route.ts", import.meta.url), "utf8");
