@@ -9,6 +9,7 @@ import { transitionStatus, type WorkflowAction } from "@/lib/workflow";
 import { connectorSecretEnvKey, type ConnectorKey } from "@/lib/integration-contract";
 import { getIntegrationSnapshot } from "@/lib/integration-service";
 import { findAccountingDocument } from "@/lib/accounting-documents";
+import { buildPreviewData } from "@/lib/preview-data";
 
 export const dynamic = "force-dynamic";
 const PERIOD = new Date().toISOString().slice(0, 7);
@@ -69,6 +70,9 @@ export async function GET() {
   try {
     const user = await getChatGPTUser();
     if (!user) return jsonError("กรุณาเข้าสู่ระบบ", 401);
+    if (process.env.KC_PREVIEW_MODE === "true" || process.env.NODE_ENV === "development") {
+      return NextResponse.json(buildPreviewData(user), { headers: { "cache-control": "private, no-store" } });
+    }
     await seedIfEmpty(user.email);
     const db = getDb();
     const [records, logs, config, files, masters, integration, preferences] = await Promise.all([

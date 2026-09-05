@@ -526,11 +526,53 @@ export const auditEvents = pgTable("audit_events", {
   index("idx_audit_events_branch").on(table.branchId),
 ]);
 
+export const accessPolicies = pgTable("access_policies", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "restrict" }),
+  key: text("key").notNull(),
+  name: text("name").notNull(),
+  department: text("department").notNull(),
+  permissions: jsonb("permissions").notNull().default(sql`'[]'::jsonb`),
+  moduleAccess: jsonb("module_access").notNull().default(sql`'["ALL"]'::jsonb`),
+  description: text("description").notNull().default(""),
+  isSystem: boolean("is_system").notNull().default(false),
+  status: text("status").notNull().default("ACTIVE"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: integer("version").notNull().default(1),
+}, (table) => [
+  uniqueIndex("uq_access_policies_company_key").on(table.companyId, table.key),
+  index("idx_access_policies_tenant_status").on(table.tenantId, table.status),
+  check("access_policies_status", sql`${table.status} in ('ACTIVE','INACTIVE')`),
+]);
+
+export const companyUsers = pgTable("company_users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "restrict" }),
+  email: text("email").notNull(),
+  fullName: text("full_name").notNull(),
+  department: text("department").notNull(),
+  employeeCode: text("employee_code"),
+  status: text("status").notNull().default("ACTIVE"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  version: integer("version").notNull().default(1),
+}, (table) => [
+  uniqueIndex("uq_company_users_email").on(table.companyId, table.email),
+  uniqueIndex("uq_company_users_employee_code").on(table.companyId, table.employeeCode),
+  index("idx_company_users_tenant_status").on(table.tenantId, table.status),
+  check("company_users_status", sql`${table.status} in ('ACTIVE','SUSPENDED','INACTIVE')`),
+]);
+
 export const userCompanyRoles = pgTable("user_company_roles", {
   tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
   companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "restrict" }),
   userId: text("user_id").notNull(),
   role: text("role").notNull(),
+  accessPolicyId: uuid("access_policy_id").references(() => accessPolicies.id, { onDelete: "restrict" }),
+  branchScope: jsonb("branch_scope").notNull().default(sql`'["ALL"]'::jsonb`),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -538,6 +580,7 @@ export const userCompanyRoles = pgTable("user_company_roles", {
   primaryKey({ columns: [table.tenantId, table.companyId, table.userId, table.role] }),
   index("idx_user_company_roles_user").on(table.userId, table.isActive),
   index("idx_user_company_roles_company").on(table.companyId),
+  index("idx_user_company_roles_policy").on(table.accessPolicyId),
 ]);
 
 // UX/UI modernization foundation. Preferences are server-persisted and never

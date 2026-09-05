@@ -22,6 +22,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import type { ChatGPTUser } from "@/app/chatgpt-auth";
 import { documentsForModule, findAccountingDocument } from "@/lib/accounting-documents";
+import { DEFAULT_POLICY_TEMPLATES } from "@/lib/access-policy-catalog";
 
 type RecordItem = {
   id: string; module: string; recordType: string; documentNo: string; sourceSystem: string;
@@ -164,6 +165,7 @@ const contrastRatio = (first: string, second: string) => {
   const lighter = Math.max(luminance(first), luminance(second)); const darker = Math.min(luminance(first), luminance(second));
   return (lighter + .05) / (darker + .05);
 };
+const clientId = () => globalThis.crypto?.randomUUID?.() || `preview-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 async function readApiJson<T extends object>(response: Response): Promise<T> {
   const raw = await response.text();
@@ -175,6 +177,41 @@ async function readApiJson<T extends object>(response: Response): Promise<T> {
   const message = "error" in body && typeof body.error === "string" ? body.error : null;
   if (!response.ok || message) throw new Error(message || `เซิร์ฟเวอร์ไม่สามารถดำเนินการได้ (HTTP ${response.status})`);
   return body as T;
+}
+
+const previewStatus: Record<string, string> = { approve: "Approved", reject: "Rejected", post: "Posted", issue: "Issued", reconcile: "Reconciled", complete: "Completed", retry: "Queued" };
+function applyPreviewMutation(current: AppData, payload: Record<string, unknown>): AppData {
+  const action = String(payload.action || "");
+  const now = new Date().toISOString();
+  const id = String(payload.id || "");
+  let records = current.records;
+  let masters = current.masters;
+  let settings = current.settings;
+  if (action === "create") {
+    const record: RecordItem = {
+      id: clientId(), module: String(payload.module || "GL"), recordType: String(payload.recordType || "Document"), documentNo: String(payload.documentNo || `QA-${Date.now()}`), sourceSystem: String(payload.sourceSystem || "Preview QA"), counterparty: String(payload.counterparty || ""), description: String(payload.description || "QA document"), amount: Math.round(Number(payload.amount || 0) * 100), taxAmount: Math.round(Number(payload.taxAmount || 0) * 100), currency: "THB", status: String(payload.status || "Draft"), dueDate: payload.dueDate ? String(payload.dueDate) : null, period: String(payload.period || current.settings.current_period), metadata: JSON.stringify(payload.metadata || {}), createdBy: current.user.email, approver: null, postedAt: null, createdAt: now, updatedAt: now,
+    };
+    records = [record, ...records];
+  } else if (action === "update") {
+    records = records.map((record) => record.id === id ? { ...record, ...payload, amount: payload.amount === undefined ? record.amount : Math.round(Number(payload.amount) * 100), taxAmount: payload.taxAmount === undefined ? record.taxAmount : Math.round(Number(payload.taxAmount) * 100), metadata: payload.metadata === undefined ? record.metadata : JSON.stringify(payload.metadata), updatedAt: now } as RecordItem : record);
+  } else if (previewStatus[action] || action === "set_status") {
+    const status = action === "set_status" ? String(payload.status || "Draft") : previewStatus[action];
+    records = records.map((record) => record.id === id ? { ...record, status, approver: action === "approve" ? current.user.email : record.approver, postedAt: action === "post" ? now : record.postedAt, updatedAt: now } : record);
+  } else if (action === "create_master") {
+    masters = [{ id: clientId(), category: String(payload.category || "MAPPING"), code: String(payload.code || `QA-${Date.now()}`), name: String(payload.name || "QA master"), description: String(payload.description || ""), status: "Active", metadata: JSON.stringify(payload.metadata || {}), createdBy: current.user.email, createdAt: now, updatedAt: now }, ...masters];
+  } else if (action === "update_master") {
+    masters = masters.map((item) => item.id === id ? { ...item, code: String(payload.code || item.code), name: String(payload.name || item.name), description: String(payload.description || ""), metadata: JSON.stringify(payload.metadata || safeMeta(item.metadata)), updatedAt: now } : item);
+  } else if (action === "toggle_master") {
+    masters = masters.map((item) => item.id === id ? { ...item, status: item.status === "Active" ? "Inactive" : "Active", updatedAt: now } : item);
+  } else if (action === "update_settings") {
+    settings = { ...settings, ...((payload.settings && typeof payload.settings === "object") ? payload.settings as Record<string, string> : {}) };
+  } else if (action === "update_setting") {
+    settings = { ...settings, [String(payload.key || "")]: String(payload.value || "") };
+  } else if (action === "lock_period") {
+    settings = { ...settings, locked_period: String(payload.period || settings.current_period) };
+  }
+  const audit: AuditItem = { id: Math.max(0, ...current.audit.map((item) => item.id)) + 1, recordId: id || null, action: `PREVIEW_${action.toUpperCase()}`, actorEmail: current.user.email, details: "QA preview action (not persisted to Production)", createdAt: now };
+  return { ...current, records, masters, settings, audit: [audit, ...current.audit] };
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -311,6 +348,11 @@ export default function KCAccountApp({ initialUser, signOutHref }: { initialUser
   async function mutate(payload: Record<string, unknown>, success: string) {
     setWorking(true);
     try {
+      if (data?.settings.preview_mode === "true") {
+        setData((current) => current ? applyPreviewMutation(current, payload) : current);
+        toast.success(success); setDetail(null);
+        return true;
+      }
       const response = await fetch("/api/records", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
       await readApiJson<{ ok: boolean }>(response);
       toast.success(success); await loadData(); setDetail(null);
@@ -322,6 +364,14 @@ export default function KCAccountApp({ initialUser, signOutHref }: { initialUser
   async function mutateIntegration(payload: Record<string, unknown>, success: string) {
     setWorking(true);
     try {
+      if (data?.settings.preview_mode === "true") {
+        const now = new Date().toISOString();
+        const system = String(payload.system || "");
+        if (payload.action === "rotate_key") setIssuedKey({ name: system || "Connector", key: `kc_preview_${clientId().replaceAll("-", "")}` });
+        setData((current) => current ? { ...current, connectors: current.connectors.map((connector) => connector.key === system ? { ...connector, status: "Ready", lastError: null, lastSyncAt: now, lastSuccessAt: now, updatedAt: now, inboundKeyConfigured: payload.action === "rotate_key" ? true : connector.inboundKeyConfigured } : connector), integrationEvents: current.integrationEvents.map((event) => payload.action === "retry" && event.id === payload.eventId ? { ...event, status: "Queued", error: null, retryCount: event.retryCount + 1 } : event) } : current);
+        toast.success(success);
+        return { ok: true, preview: true };
+      }
       const response = await fetch("/api/integrations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
       const body = await readApiJson<Record<string, unknown>>(response);
       if (body.apiKey) setIssuedKey({ name: String(payload.system || "Connector"), key: String(body.apiKey) });
@@ -348,6 +398,12 @@ export default function KCAccountApp({ initialUser, signOutHref }: { initialUser
     if (!file || !uploadRecord) return;
     const form = new FormData(); form.set("file", file); form.set("recordId", uploadRecord.id); setWorking(true);
     try {
+      if (data?.settings.preview_mode === "true") {
+        const now = new Date().toISOString();
+        setData((current) => current ? { ...current, documents: [{ id: clientId(), recordId: uploadRecord.id, name: file.name, size: file.size, createdAt: now }, ...current.documents], audit: [{ id: Math.max(0, ...current.audit.map((item) => item.id)) + 1, recordId: uploadRecord.id, action: "PREVIEW_FILE_ATTACHED", actorEmail: current.user.email, details: `${file.name} metadata only`, createdAt: now }, ...current.audit] } : current);
+        toast.success(`แนบ ${file.name} ใน Preview แล้ว`);
+        return;
+      }
       const response = await fetch("/api/upload", { method: "POST", body: form });
       await readApiJson<{ ok: boolean }>(response);
       toast.success(`แนบ ${file.name} แล้ว`); await loadData();
@@ -356,11 +412,16 @@ export default function KCAccountApp({ initialUser, signOutHref }: { initialUser
   }
 
   const savePreferences = useCallback(async (updates: Partial<UserPreferences>) => {
+    if (data?.settings.preview_mode === "true") {
+      const next = { ...preferences, ...updates };
+      setPreferences(next); setData((current) => current ? { ...current, preferences: next } : current);
+      return next;
+    }
     const response = await fetch("/api/preferences", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(updates) });
     const result = await readApiJson<{ ok: boolean; preferences: UserPreferences }>(response);
     setPreferences(result.preferences);
     return result.preferences;
-  }, []);
+  }, [data?.settings.preview_mode, preferences]);
   const changeLanguage = (value: string) => { if (value !== "th" && value !== "en") return; setLanguage(value); setPreferences((current) => ({ ...current, language: value })); window.localStorage.setItem("kc-account-language", value); document.documentElement.lang = value; void savePreferences({ language: value }).catch(() => toast.error(value === "th" ? "บันทึกภาษาไม่สำเร็จ" : "Could not save language")); };
   const selectPage = (id: string) => { setActive(id); setSearch(""); };
   const masterPages = ["company", "coa", "customers", "users"];
@@ -515,10 +576,11 @@ function ModuleView({ active, records, data, working, mutate, onDetail, onEdit, 
   const [viewName, setViewName] = useState("");
   const [viewBusy, setViewBusy] = useState(false);
   useEffect(() => {
+    if (data.settings.preview_mode === "true") return;
     let activeRequest = true;
     void fetch(`/api/saved-views?module=${encodeURIComponent(active)}`, { cache: "no-store" }).then((response) => readApiJson<{ views: SavedView[] }>(response)).then((body) => { if (activeRequest) setSavedViews(body.views); }).catch(() => { if (activeRequest) setSavedViews([]); });
     return () => { activeRequest = false; };
-  }, [active]);
+  }, [active, data.settings.preview_mode]);
   function applySavedView(id: string) {
     setSelectedViewId(id);
     if (id === "DEFAULT") { setStatusFilter("ALL"); setTypeFilter("ALL"); setPage(1); return; }
@@ -533,6 +595,11 @@ function ModuleView({ active, records, data, working, mutate, onDetail, onEdit, 
     if (!viewName.trim()) return;
     setViewBusy(true);
     try {
+      if (data.settings.preview_mode === "true") {
+        const created: SavedView = { id: clientId(), module: active, name: viewName.trim(), visibility: "PRIVATE", configuration: { statusFilter, typeFilter }, updatedAt: new Date().toISOString() };
+        setSavedViews((current) => [created, ...current]); setSelectedViewId(created.id); setViewName(""); setSaveViewOpen(false); toast.success(tr("บันทึกมุมมอง Preview แล้ว", "Preview view saved"));
+        return;
+      }
       const response = await fetch("/api/saved-views", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "save", module: active, name: viewName.trim(), configuration: { statusFilter, typeFilter } }) });
       const body = await readApiJson<{ ok: boolean; views: SavedView[] }>(response);
       setSavedViews(body.views); setViewName(""); setSaveViewOpen(false); toast.success(tr("บันทึกมุมมองส่วนตัวแล้ว", "Personal view saved"));
@@ -588,8 +655,42 @@ function MasterView({ active, data, working, mutate, canManage }: { active: stri
       <div className="panel-head"><div><p className="eyebrow">MASTER DATA</p><h2>{labels[active]}</h2></div>{canManage && <Button onClick={openCreate}><Plus />{active === "customers" ? tr("เพิ่มลูกค้า", "Add customer") : tr("เพิ่มข้อมูล", "Add record")}</Button>}</div>
       <Table><TableHeader><TableRow><TableHead>{tr("ประเภท", "Type")}</TableHead><TableHead>{tr("รหัส", "Code")}</TableHead><TableHead>{tr("ชื่อ", "Name")}</TableHead><TableHead>{active === "customers" ? tr("เลขผู้เสียภาษี / ผู้ติดต่อ", "Tax ID / Contact") : tr("รายละเอียด / สิทธิ์ / Mapping", "Details / Permissions / Mapping")}</TableHead><TableHead>{tr("สถานะ", "Status")}</TableHead><TableHead className="action-cell">{tr("ดำเนินการ", "Actions")}</TableHead></TableRow></TableHeader><TableBody>{rows.map((item) => { const meta = safeMeta(item.metadata); return <TableRow key={item.id}><TableCell>{item.category}</TableCell><TableCell><strong>{item.code}</strong></TableCell><TableCell><strong className="cell-title">{item.name}</strong><small className="cell-sub">{item.description || "—"}</small></TableCell><TableCell>{active === "customers" ? <><strong className="cell-title">{String(meta.taxId || "—")}</strong><small className="cell-sub">{String(meta.contactName || meta.email || meta.phone || "—")}</small></> : item.description || String(meta.role || "—")}</TableCell><TableCell><StatusBadge status={item.status} /></TableCell><TableCell className="action-cell">{canManage && <div className="row-actions"><Button size="icon-sm" variant="outline" disabled={working} title={tr("แก้ไข", "Edit")} onClick={() => openEdit(item)}><Pencil /></Button><Button size="sm" variant="outline" disabled={working} onClick={() => mutate({ action: "toggle_master", id: item.id }, tr("อัปเดตสถานะแล้ว", "Status updated"))}>{item.status === "Active" ? tr("ระงับ", "Disable") : tr("เปิดใช้", "Enable")}</Button></div>}</TableCell></TableRow>; })}</TableBody></Table>
     </section>
-    <Dialog open={open} onOpenChange={(value) => { setOpen(value); if (!value) setEditing(null); }}><DialogContent key={editing?.id || "new-master"} className="create-dialog"><form onSubmit={submit}><DialogHeader><DialogTitle>{editing ? tr("แก้ไข", "Edit") : tr("เพิ่ม", "Add")} {labels[active]}</DialogTitle><DialogDescription>{tr("ระบบจะบันทึกผู้ดำเนินการและเวลาใน Audit Log", "The acting user and timestamp will be recorded in the audit log.")}</DialogDescription></DialogHeader><div className="form-grid master-form"><label>{tr("ประเภท", "Type")}<select name="category" defaultValue={editing?.category || categories[0]} disabled={!!editing}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label><label>{tr("รหัส", "Code")}<Input name="code" required defaultValue={editing?.code || ""} placeholder={tr("ระบุรหัสที่ไม่ซ้ำ", "Enter a unique code")} /></label><label className="wide">{active === "customers" ? tr("ชื่อลูกค้า / บริษัท", "Customer / company name") : tr("ชื่อ / อีเมลผู้ใช้", "Name / User email")}<Input name="name" required defaultValue={editing?.name || ""} placeholder={tr("ชื่อรายการหรืออีเมล", "Record name or email")} /></label>{active === "users" && <label>Role<select name="role" defaultValue={String(safeMeta(editing?.metadata || "{}").role || "Viewer")}><option>Admin</option><option>Accountant</option><option>Approver</option><option>Viewer</option></select></label>}{active === "customers" && <><label>{tr("เลขประจำตัวผู้เสียภาษี", "Tax ID")}<Input name="taxId" defaultValue={String(safeMeta(editing?.metadata || "{}").taxId || "")} maxLength={13} /></label><label>{tr("ชื่อผู้ติดต่อ", "Contact name")}<Input name="contactName" defaultValue={String(safeMeta(editing?.metadata || "{}").contactName || "")} /></label><label>{tr("อีเมล", "Email")}<Input name="email" type="email" defaultValue={String(safeMeta(editing?.metadata || "{}").email || "")} /></label><label>{tr("โทรศัพท์", "Phone")}<Input name="phone" defaultValue={String(safeMeta(editing?.metadata || "{}").phone || "")} /></label><label>{tr("เครดิต (วัน)", "Payment terms (days)")}<Input name="paymentTerms" type="number" min="0" max="365" defaultValue={String(safeMeta(editing?.metadata || "{}").paymentTerms || "30")} /></label></>}<label className="wide">{active === "customers" ? tr("ที่อยู่สำหรับออกเอกสาร", "Billing address") : tr("รายละเอียด / ขอบเขตสิทธิ์ / กฎ Mapping", "Details / Permission scope / Mapping rule")}<Input name="description" defaultValue={editing?.description || ""} placeholder={tr("รายละเอียดเพิ่มเติม", "Additional details")} /></label></div><DialogFooter><Button type="button" variant="outline" onClick={() => { setOpen(false); setEditing(null); }}>{tr("ยกเลิก", "Cancel")}</Button><Button type="submit" disabled={working}>{tr("บันทึก", "Save")}</Button></DialogFooter></form></DialogContent></Dialog>
+    {active === "users" && <PolicyMatrix preview={data.settings.preview_mode === "true"} canManage={canManage} />}
+    <Dialog open={open} onOpenChange={(value) => { setOpen(value); if (!value) setEditing(null); }}><DialogContent key={editing?.id || "new-master"} className="create-dialog"><form onSubmit={submit}><DialogHeader><DialogTitle>{editing ? tr("แก้ไข", "Edit") : tr("เพิ่ม", "Add")} {labels[active]}</DialogTitle><DialogDescription>{tr("ระบบจะบันทึกผู้ดำเนินการและเวลาใน Audit Log", "The acting user and timestamp will be recorded in the audit log.")}</DialogDescription></DialogHeader><div className="form-grid master-form"><label>{tr("ประเภท", "Type")}<select name="category" defaultValue={editing?.category || categories[0]} disabled={!!editing}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label><label>{tr("รหัส", "Code")}<Input name="code" required defaultValue={editing?.code || ""} placeholder={tr("ระบุรหัสที่ไม่ซ้ำ", "Enter a unique code")} /></label><label className="wide">{active === "customers" ? tr("ชื่อลูกค้า / บริษัท", "Customer / company name") : tr("ชื่อ / อีเมลผู้ใช้", "Name / User email")}<Input name="name" required defaultValue={editing?.name || ""} placeholder={tr("ชื่อรายการหรืออีเมล", "Record name or email")} /></label>{active === "users" && <label>Policy<select name="role" defaultValue={String(safeMeta(editing?.metadata || "{}").role || "INTERNAL_AUDITOR")}>{DEFAULT_POLICY_TEMPLATES.map((policy) => <option key={policy.key} value={policy.key}>{policy.name}</option>)}</select></label>}{active === "customers" && <><label>{tr("เลขประจำตัวผู้เสียภาษี", "Tax ID")}<Input name="taxId" defaultValue={String(safeMeta(editing?.metadata || "{}").taxId || "")} maxLength={13} /></label><label>{tr("ชื่อผู้ติดต่อ", "Contact name")}<Input name="contactName" defaultValue={String(safeMeta(editing?.metadata || "{}").contactName || "")} /></label><label>{tr("อีเมล", "Email")}<Input name="email" type="email" defaultValue={String(safeMeta(editing?.metadata || "{}").email || "")} /></label><label>{tr("โทรศัพท์", "Phone")}<Input name="phone" defaultValue={String(safeMeta(editing?.metadata || "{}").phone || "")} /></label><label>{tr("เครดิต (วัน)", "Payment terms (days)")}<Input name="paymentTerms" type="number" min="0" max="365" defaultValue={String(safeMeta(editing?.metadata || "{}").paymentTerms || "30")} /></label></>}<label className="wide">{active === "customers" ? tr("ที่อยู่สำหรับออกเอกสาร", "Billing address") : tr("รายละเอียด / ขอบเขตสิทธิ์ / กฎ Mapping", "Details / Permission scope / Mapping rule")}<Input name="description" defaultValue={editing?.description || ""} placeholder={tr("รายละเอียดเพิ่มเติม", "Additional details")} /></label></div><DialogFooter><Button type="button" variant="outline" onClick={() => { setOpen(false); setEditing(null); }}>{tr("ยกเลิก", "Cancel")}</Button><Button type="submit" disabled={working}>{tr("บันทึก", "Save")}</Button></DialogFooter></form></DialogContent></Dialog>
   </>;
+}
+
+type EditablePolicy = (typeof DEFAULT_POLICY_TEMPLATES)[number] & { id?: string; status?: "ACTIVE" | "INACTIVE" };
+const POLICY_PERMISSIONS = ["read", "create", "post", "approve", "reconcile", "close_period", "review_ai", "export", "manage_master", "manage_users", "manage_settings", "manage_integrations"];
+function PolicyMatrix({ preview, canManage }: { preview: boolean; canManage: boolean }) {
+  const { language, tr } = useLanguage();
+  const [policies, setPolicies] = useState<EditablePolicy[]>(DEFAULT_POLICY_TEMPLATES.map((policy) => ({ ...policy, status: "ACTIVE" })));
+  const [editing, setEditing] = useState<EditablePolicy | null>(null);
+  const [scope, setScope] = useState<{ tenantId: string; companyId: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (preview || !canManage) return;
+    let mounted = true;
+    void fetch("/api/v1/context", { cache: "no-store" }).then((response) => readApiJson<{ companies: Array<{ tenantId: string; companyId: string }> }>(response)).then(async (context) => {
+      const company = context.companies[0]; if (!company || !mounted) return; setScope(company);
+      const response = await fetch(`/api/v1/access-policies?tenantId=${company.tenantId}&companyId=${company.companyId}`, { cache: "no-store" });
+      const body = await readApiJson<{ policies: Array<EditablePolicy & { moduleAccess?: string[] }> }>(response); if (mounted) setPolicies(body.policies.map((policy) => ({ ...policy, modules: policy.modules || policy.moduleAccess || [] })));
+    }).catch((error) => toast.error(error instanceof Error ? error.message : language === "th" ? "โหลด Policy ไม่สำเร็จ" : "Could not load policies"));
+    return () => { mounted = false; };
+  }, [canManage, language, preview]);
+  async function savePolicy() {
+    if (!editing) return; setBusy(true);
+    try {
+      if (!preview) {
+        if (!scope) throw new Error(tr("ยังไม่พบ Company scope", "Company scope is unavailable"));
+        const response = await fetch("/api/v1/access-policies", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: editing.id, key: editing.key, name: editing.name, department: editing.department, description: editing.description, permissions: editing.permissions, modules: editing.modules, status: editing.status || "ACTIVE", ...scope }) });
+        const body = await readApiJson<{ policy: EditablePolicy & { moduleAccess?: string[] } }>(response); const saved = { ...body.policy, modules: body.policy.modules || body.policy.moduleAccess || [] }; setPolicies((current) => current.map((policy) => policy.key === saved.key ? saved : policy));
+      } else setPolicies((current) => current.map((policy) => policy.key === editing.key ? editing : policy));
+      setEditing(null); toast.success(tr("บันทึก Policy แล้ว", "Policy saved"));
+    } catch (error) { toast.error(error instanceof Error ? error.message : tr("บันทึก Policy ไม่สำเร็จ", "Could not save policy")); }
+    finally { setBusy(false); }
+  }
+  return <section className="panel table-panel"><div className="panel-head"><div><p className="eyebrow">EDITABLE ACCESS POLICY</p><h2>{tr("Policy ตามฝ่ายงาน", "Department policies")}</h2></div><Badge variant="outline"><ShieldCheck />{policies.length} Policies</Badge></div><Table><TableHeader><TableRow><TableHead>{tr("ฝ่าย / Policy", "Department / Policy")}</TableHead><TableHead>{tr("โมดูล", "Modules")}</TableHead><TableHead>{tr("สิทธิ์", "Permissions")}</TableHead><TableHead>{tr("สถานะ", "Status")}</TableHead><TableHead className="action-cell">{tr("แก้ไข", "Edit")}</TableHead></TableRow></TableHeader><TableBody>{policies.map((policy) => <TableRow key={policy.key}><TableCell><strong className="cell-title">{policy.name}</strong><small className="cell-sub">{policy.department} · {policy.key}</small></TableCell><TableCell>{policy.modules.join(", ")}</TableCell><TableCell>{policy.permissions.length} {tr("สิทธิ์", "permissions")}</TableCell><TableCell><StatusBadge status={policy.status === "INACTIVE" ? "Inactive" : "Active"} /></TableCell><TableCell className="action-cell"><Button size="icon-sm" variant="outline" disabled={!canManage} onClick={() => setEditing({ ...policy, permissions: [...policy.permissions], modules: [...policy.modules] })}><Pencil /></Button></TableCell></TableRow>)}</TableBody></Table><Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}><DialogContent className="create-dialog"><DialogHeader><DialogTitle>{tr("แก้ไข Access Policy", "Edit access policy")}</DialogTitle><DialogDescription>{editing?.name} · {editing?.department}</DialogDescription></DialogHeader>{editing && <div className="form-grid master-form"><label className="wide">{tr("ชื่อ Policy", "Policy name")}<Input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} /></label><label className="wide">{tr("โมดูล (คั่นด้วย comma)", "Modules (comma-separated)")}<Input value={editing.modules.join(", ")} onChange={(event) => setEditing({ ...editing, modules: event.target.value.split(",").map((value) => value.trim().toUpperCase()).filter(Boolean) })} /></label><div className="wide permission-check-grid">{POLICY_PERMISSIONS.map((permission) => <label key={permission}><input type="checkbox" checked={editing.permissions.includes(permission as never)} onChange={(event) => setEditing({ ...editing, permissions: event.target.checked ? [...editing.permissions, permission as never] : editing.permissions.filter((value) => value !== permission) })} />{permission}</label>)}</div></div>}<DialogFooter><Button variant="outline" onClick={() => setEditing(null)}>{tr("ยกเลิก", "Cancel")}</Button><Button disabled={busy} onClick={() => void savePolicy()}>{busy ? <Loader2 className="spin" /> : <Save />}{tr("บันทึก Policy", "Save policy")}</Button></DialogFooter></DialogContent></Dialog></section>;
 }
 
 function AuditPage({ logs }: { logs: AuditItem[] }) {
@@ -629,6 +730,7 @@ function SettingsView({ data, working, mutate, canManage, preferences, savePrefe
     if (!["image/png", "image/jpeg"].includes(file.type) || file.size > 1024 * 1024) { toast.error(tr("รองรับ PNG หรือ JPG ขนาดไม่เกิน 1 MB", "Use a PNG or JPG file up to 1 MB")); return; }
     setLogoBusy(true);
     try {
+      if (data.settings.preview_mode === "true") { setLogoSrc(URL.createObjectURL(file)); toast.success(tr("แสดง Logo ใน Preview แล้ว", "Logo preview updated")); return; }
       const form = new FormData(); form.set("file", file);
       const response = await fetch("/api/branding/logo", { method: "POST", body: form });
       const body = await readApiJson<{ ok: boolean; key: string }>(response);
@@ -639,7 +741,7 @@ function SettingsView({ data, working, mutate, canManage, preferences, savePrefe
 
   async function resetLogo() {
     setLogoBusy(true);
-    try { const response = await fetch("/api/branding/logo", { method: "DELETE" }); await readApiJson<{ ok: boolean }>(response); setLogoSrc("/account360-logo.png"); toast.success(tr("กลับไปใช้ Logo มาตรฐานแล้ว", "Default logo restored")); }
+    try { if (data.settings.preview_mode === "true") { setLogoSrc("/account360-logo.png"); toast.success(tr("กลับไปใช้ Logo มาตรฐานแล้ว", "Default logo restored")); return; } const response = await fetch("/api/branding/logo", { method: "DELETE" }); await readApiJson<{ ok: boolean }>(response); setLogoSrc("/account360-logo.png"); toast.success(tr("กลับไปใช้ Logo มาตรฐานแล้ว", "Default logo restored")); }
     catch (error) { toast.error(error instanceof Error ? error.message : tr("คืนค่า Logo ไม่สำเร็จ", "Could not restore the logo")); }
     finally { setLogoBusy(false); }
   }
