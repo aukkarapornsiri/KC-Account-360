@@ -69,6 +69,9 @@ test("renders the KC EAM-inspired navigation sidebar", async () => {
   assert.match(source, /className="kc-current-company"/);
   assert.match(source, /System Control/);
   assert.match(source, /className="kc-ai-card"/);
+  assert.match(source, /className="kc-nav-button kc-system-entry"/);
+  assert.match(source, /onClick=\{\(\) => goTo\("settings"\)\}/);
+  assert.doesNotMatch(source, /<NavigationGroup label="System Control"/);
   assert.match(css, /\.kc-sidebar-shell\s*\{[^}]*height:\s*100%/s);
   assert.match(css, /\.kc-sidebar-logo\s*\{[^}]*background:\s*var\(--kc-sidebar-surface\)/s);
   assert.match(css, /\.kc-system-submenu button\[data-active="true"\]/);
