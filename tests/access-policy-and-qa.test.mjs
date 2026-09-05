@@ -6,8 +6,8 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("defines editable company policies and governed company users", async () => {
   const [schema, policies, users] = await Promise.all([read("db/schema.ts"), read("app/api/v1/access-policies/route.ts"), read("app/api/v1/users/route.ts")]);
-  assert.match(schema, /accessPolicies = pgTable\("access_policies"/);
-  assert.match(schema, /companyUsers = pgTable\("company_users"/);
+  assert.match(schema, /accessPolicies = pgTable\(\s*"access_policies"/);
+  assert.match(schema, /companyUsers = pgTable\(\s*"company_users"/);
   assert.match(policies, /SYSTEM_ADMIN_MUST_REMAIN_ACTIVE_WITH_ADMIN_PERMISSIONS/);
   assert.match(policies, /SYSTEM_POLICY_KEY_IMMUTABLE/);
   assert.match(users, /LAST_USER_ADMIN_REQUIRED/);

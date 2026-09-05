@@ -1,15 +1,9 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { timingSafeEqual } from "node:crypto";
 import { getDb } from "@/db";
-import { auditLogs, financialRecords, integrationConnectors, integrationConnectorScopes, integrationEvents } from "@/db/schema";
-import {
-  CONNECTORS,
-  CONNECTOR_KEYS,
-  inboundEventSchema,
-  mapInboundEvent,
-  type ConnectorKey,
-  type InboundEvent,
-} from "@/lib/integration-contract";
+import { auditLogs, documentNumberSequences, financialRecords, integrationConnectors, integrationConnectorScopes, integrationEvents } from "@/db/schema";
+import { CONNECTORS, CONNECTOR_KEYS, inboundEventSchema, mapInboundEvent, type ConnectorKey, type InboundEvent } from "@/lib/integration-contract";
+import { documentNumberPeriod, documentNumberPrefix, documentNumberSeriesKey, formatDocumentNumber } from "@/lib/document-numbering";
 
 const SYSTEM_ACTOR = "integration-api@kc-account";
 
@@ -20,7 +14,10 @@ function errorMessage(error: unknown) {
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(",")}}`;
   }
   return JSON.stringify(value) ?? "null";
 }
@@ -35,24 +32,27 @@ export async function ensureConnectorRows(actor = SYSTEM_ACTOR) {
   const now = new Date().toISOString();
   for (const key of CONNECTOR_KEYS) {
     const connector = CONNECTORS[key];
-    await db.insert(integrationConnectors).values({
-      key,
-      name: connector.name,
-      baseUrl: "",
-      apiKeyHash: null,
-      status: "Setup Required",
-      cursor: "",
-      recordsSynced: 0,
-      lastSyncAt: null,
-      lastSuccessAt: null,
-      lastError: null,
-      updatedBy: actor,
-      createdAt: now,
-      updatedAt: now,
-    }).onConflictDoUpdate({
-      target: integrationConnectors.key,
-      set: { name: connector.name },
-    });
+    await db
+      .insert(integrationConnectors)
+      .values({
+        key,
+        name: connector.name,
+        baseUrl: "",
+        apiKeyHash: null,
+        status: "Setup Required",
+        cursor: "",
+        recordsSynced: 0,
+        lastSyncAt: null,
+        lastSuccessAt: null,
+        lastError: null,
+        updatedBy: actor,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: integrationConnectors.key,
+        set: { name: connector.name },
+      });
   }
 }
 
@@ -65,7 +65,13 @@ export async function createConnectorApiKey(system: ConnectorKey, actor: string)
   const now = new Date().toISOString();
   const db = getDb();
   await db.update(integrationConnectors).set({ apiKeyHash, updatedBy: actor, updatedAt: now }).where(eq(integrationConnectors.key, system));
-  await db.insert(auditLogs).values({ recordId: system, action: "ROTATE_INTEGRATION_KEY", actorEmail: actor, details: `Rotated inbound API key for ${CONNECTORS[system].name}`, createdAt: now });
+  await db.insert(auditLogs).values({
+    recordId: system,
+    action: "ROTATE_INTEGRATION_KEY",
+    actorEmail: actor,
+    details: `Rotated inbound API key for ${CONNECTORS[system].name}`,
+    createdAt: now,
+  });
   return apiKey;
 }
 
@@ -84,13 +90,12 @@ export async function authenticateConnector(system: ConnectorKey, request: Reque
 }
 
 export async function authorizeAccountingConnector(system: ConnectorKey, request: Request, tenantId: string, companyId: string) {
-  if (!await authenticateConnector(system, request)) return false;
-  const [scope] = await getDb().select({ connectorKey: integrationConnectorScopes.connectorKey }).from(integrationConnectorScopes).where(and(
-    eq(integrationConnectorScopes.connectorKey, system),
-    eq(integrationConnectorScopes.tenantId, tenantId),
-    eq(integrationConnectorScopes.companyId, companyId),
-    eq(integrationConnectorScopes.isActive, true),
-  )).limit(1);
+  if (!(await authenticateConnector(system, request))) return false;
+  const [scope] = await getDb()
+    .select({ connectorKey: integrationConnectorScopes.connectorKey })
+    .from(integrationConnectorScopes)
+    .where(and(eq(integrationConnectorScopes.connectorKey, system), eq(integrationConnectorScopes.tenantId, tenantId), eq(integrationConnectorScopes.companyId, companyId), eq(integrationConnectorScopes.isActive, true)))
+    .limit(1);
   return Boolean(scope);
 }
 
@@ -108,13 +113,18 @@ async function processParsedEvent(system: ConnectorKey, event: InboundEvent, act
   let eventId = existingEventId;
 
   if (!eventId) {
-    const [existing] = await db.select().from(integrationEvents).where(and(
-      eq(integrationEvents.sourceSystem, system),
-      eq(integrationEvents.externalEventId, event.event_id),
-    )).limit(1);
+    const [existing] = await db
+      .select()
+      .from(integrationEvents)
+      .where(and(eq(integrationEvents.sourceSystem, system), eq(integrationEvents.externalEventId, event.event_id)))
+      .limit(1);
     if (existing) {
       if (existing.payloadHash !== payloadHash) throw new Error("event_id นี้เคยถูกใช้กับ Payload อื่น");
-      return { eventId: existing.id, financialRecordId: existing.financialRecordId, status: "Duplicate" };
+      return {
+        eventId: existing.id,
+        financialRecordId: existing.financialRecordId,
+        status: "Duplicate",
+      };
     }
     eventId = crypto.randomUUID();
     await db.insert(integrationEvents).values({
@@ -137,30 +147,77 @@ async function processParsedEvent(system: ConnectorKey, event: InboundEvent, act
   try {
     const mapped = mapInboundEvent(system, event);
     const financialRecordId = crypto.randomUUID();
-    await db.insert(financialRecords).values({
-      id: financialRecordId,
-      ...mapped,
-      createdBy: actor,
-      approver: null,
-      postedAt: null,
-      createdAt: now,
-      updatedAt: now,
+    const prefix = documentNumberPrefix(mapped.module, mapped.recordType);
+    const periodKey = documentNumberPeriod(event.occurred_at.slice(0, 10), event.period);
+    const seriesKey = documentNumberSeriesKey(prefix, periodKey);
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${seriesKey}))`);
+      const [sequence] = await tx.select().from(documentNumberSequences).where(eq(documentNumberSequences.seriesKey, seriesKey)).limit(1);
+      const allocated = sequence?.nextNumber ?? 1;
+      const documentNo = formatDocumentNumber(prefix, periodKey, allocated);
+      if (sequence) {
+        await tx
+          .update(documentNumberSequences)
+          .set({ nextNumber: allocated + 1, updatedAt: now })
+          .where(eq(documentNumberSequences.seriesKey, seriesKey));
+      } else {
+        await tx.insert(documentNumberSequences).values({
+          seriesKey,
+          prefix,
+          periodKey,
+          nextNumber: 2,
+          updatedAt: now,
+        });
+      }
+      await tx.insert(financialRecords).values({
+        id: financialRecordId,
+        ...mapped,
+        documentNo,
+        createdBy: actor,
+        approver: null,
+        postedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await tx
+        .update(integrationEvents)
+        .set({
+          status: "Processed",
+          financialRecordId,
+          error: null,
+          processedAt: now,
+        })
+        .where(eq(integrationEvents.id, eventId));
+      await tx
+        .update(integrationConnectors)
+        .set({
+          status: "Active",
+          recordsSynced: sql`${integrationConnectors.recordsSynced} + 1`,
+          lastSuccessAt: now,
+          lastError: null,
+          updatedAt: now,
+        })
+        .where(eq(integrationConnectors.key, system));
+      await tx.insert(auditLogs).values({
+        recordId: financialRecordId,
+        action: "INTEGRATION_RECEIVED",
+        actorEmail: actor,
+        details: `${CONNECTORS[system].name}: ${event.event_type} ${event.document_no} -> ${documentNo}`,
+        createdAt: now,
+      });
     });
-    await db.update(integrationEvents).set({ status: "Processed", financialRecordId, error: null, processedAt: now }).where(eq(integrationEvents.id, eventId));
-    await db.update(integrationConnectors).set({
-      status: "Active",
-      recordsSynced: sql`${integrationConnectors.recordsSynced} + 1`,
-      lastSuccessAt: now,
-      lastError: null,
-      updatedAt: now,
-    }).where(eq(integrationConnectors.key, system));
-    await db.insert(auditLogs).values({ recordId: financialRecordId, action: "INTEGRATION_RECEIVED", actorEmail: actor, details: `${CONNECTORS[system].name}: ${event.event_type} ${event.document_no}`, createdAt: now });
     return { eventId, financialRecordId, status: "Processed" };
   } catch (error) {
     const message = errorMessage(error);
     await db.update(integrationEvents).set({ status: "Failed", error: message, processedAt: now }).where(eq(integrationEvents.id, eventId));
     await db.update(integrationConnectors).set({ status: "Error", lastError: message, updatedAt: now }).where(eq(integrationConnectors.key, system));
-    await db.insert(auditLogs).values({ recordId: eventId, action: "INTEGRATION_FAILED", actorEmail: actor, details: `${CONNECTORS[system].name}: ${message}`, createdAt: now });
+    await db.insert(auditLogs).values({
+      recordId: eventId,
+      action: "INTEGRATION_FAILED",
+      actorEmail: actor,
+      details: `${CONNECTORS[system].name}: ${message}`,
+      createdAt: now,
+    });
     throw error;
   }
 }
@@ -175,11 +232,19 @@ export async function retryIntegrationEvent(eventId: string, actor: string) {
   const db = getDb();
   const [stored] = await db.select().from(integrationEvents).where(eq(integrationEvents.id, eventId)).limit(1);
   if (!stored) throw new Error("ไม่พบ Integration Event");
-  if (stored.status === "Processed") return { eventId: stored.id, financialRecordId: stored.financialRecordId, status: "Duplicate" as const };
+  if (stored.status === "Processed")
+    return {
+      eventId: stored.id,
+      financialRecordId: stored.financialRecordId,
+      status: "Duplicate" as const,
+    };
   const system = stored.sourceSystem as ConnectorKey;
   if (!CONNECTOR_KEYS.includes(system)) throw new Error("ระบบต้นทางไม่ถูกต้อง");
   const parsed = inboundEventSchema.parse(JSON.parse(stored.payload));
-  await db.update(integrationEvents).set({ retryCount: stored.retryCount + 1, status: "Received", error: null }).where(eq(integrationEvents.id, eventId));
+  await db
+    .update(integrationEvents)
+    .set({ retryCount: stored.retryCount + 1, status: "Received", error: null })
+    .where(eq(integrationEvents.id, eventId));
   return processParsedEvent(system, parsed, actor, eventId);
 }
 
@@ -187,20 +252,35 @@ export async function recordSyncFailure(system: ConnectorKey, actor: string, err
   const db = getDb();
   const now = new Date().toISOString();
   const message = errorMessage(error);
-  await db.update(integrationConnectors).set({ status: "Error", lastSyncAt: now, lastError: message, updatedBy: actor, updatedAt: now }).where(eq(integrationConnectors.key, system));
-  await db.insert(auditLogs).values({ recordId: system, action: "INTEGRATION_SYNC_FAILED", actorEmail: actor, details: `${CONNECTORS[system].name}: ${message}`, createdAt: now });
+  await db
+    .update(integrationConnectors)
+    .set({
+      status: "Error",
+      lastSyncAt: now,
+      lastError: message,
+      updatedBy: actor,
+      updatedAt: now,
+    })
+    .where(eq(integrationConnectors.key, system));
+  await db.insert(auditLogs).values({
+    recordId: system,
+    action: "INTEGRATION_SYNC_FAILED",
+    actorEmail: actor,
+    details: `${CONNECTORS[system].name}: ${message}`,
+    createdAt: now,
+  });
   return message;
 }
 
 export async function getIntegrationSnapshot(actor = SYSTEM_ACTOR) {
   await ensureConnectorRows(actor);
   const db = getDb();
-  const [connectors, events] = await Promise.all([
-    db.select().from(integrationConnectors).orderBy(integrationConnectors.name),
-    db.select().from(integrationEvents).orderBy(desc(integrationEvents.receivedAt)).limit(100),
-  ]);
+  const [connectors, events] = await Promise.all([db.select().from(integrationConnectors).orderBy(integrationConnectors.name), db.select().from(integrationEvents).orderBy(desc(integrationEvents.receivedAt)).limit(100)]);
   return {
-    connectors: connectors.map(({ apiKeyHash, ...connector }) => ({ ...connector, inboundKeyConfigured: Boolean(apiKeyHash) })),
+    connectors: connectors.map(({ apiKeyHash, ...connector }) => ({
+      ...connector,
+      inboundKeyConfigured: Boolean(apiKeyHash),
+    })),
     events,
   };
 }

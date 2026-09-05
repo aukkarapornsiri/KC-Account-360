@@ -61,6 +61,37 @@ test("applies the KC AI CI token baseline consistently", async () => {
   assert.doesNotMatch(css, /--background:\s*#0a0a0a/i);
 });
 
+test("allocates international-style monthly document numbers for every AP and AR type", async () => {
+  const { ACCOUNTING_DOCUMENTS } = await vite.ssrLoadModule("/lib/accounting-documents.ts");
+  const { documentNumberPeriod, documentNumberPrefix, formatDocumentNumber, nextPreviewDocumentNumber } = await vite.ssrLoadModule("/lib/document-numbering.ts");
+
+  assert.equal(documentNumberPeriod("2026-09-05", "2026-08"), "202609");
+  assert.equal(formatDocumentNumber("SI", "202609", 1), "SI-202609-000001");
+  for (const definition of ACCOUNTING_DOCUMENTS) {
+    const prefix = documentNumberPrefix(definition.module, definition.type);
+    assert.equal(prefix, definition.prefix);
+    assert.equal(formatDocumentNumber(prefix, "202609", 1), `${definition.prefix}-202609-000001`);
+  }
+
+  const next = nextPreviewDocumentNumber([{ documentNo: "SI-202609-000001" }, { documentNo: "SI-202609-000007" }, { documentNo: "SI-202608-000099" }, { documentNo: "SI-LEGACY-001" }], "AR", "Invoice", "2026-09-05", "2026-09");
+  assert.equal(next, "SI-202609-000008");
+});
+
+test("assigns document numbers only on the server and locks each series transactionally", async () => {
+  const api = await readFile(new URL("../app/api/records/route.ts", import.meta.url), "utf8");
+  const app = await readFile(new URL("../app/kc-account-app.tsx", import.meta.url), "utf8");
+  const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+
+  assert.match(api, /pg_advisory_xact_lock/);
+  assert.match(api, /documentNumberSequences/);
+  assert.match(api, /formatDocumentNumber/);
+  assert.doesNotMatch(api, /body\.documentNo/);
+  assert.doesNotMatch(app, /name="documentNo"/);
+  assert.match(app, /Assigned automatically on save/);
+  assert.match(schema, /document_number_sequences/);
+  assert.match(schema, /document_number_sequences_next_positive/);
+});
+
 test("renders the KC EAM-inspired navigation sidebar", async () => {
   const source = await readFile(new URL("../app/kc-account-app.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
@@ -179,7 +210,7 @@ test("renders the complete user and permission management workspace", async () =
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(source, /function UserPermissionWorkspace/);
-  assert.match(source, /active === "users" \? <UserPermissionWorkspace/);
+  assert.match(source, /active === "users"\s*\?\s*\(\s*<UserPermissionWorkspace/);
   for (const label of ["User Management", "Roles & Permissions", "Dashboard Visibility", "Approval Workflow", "Audit Log"]) {
     assert.match(source, new RegExp(label.replace("&", "\\&")));
   }
@@ -245,9 +276,7 @@ test("emits chart themes for the starter's media dark mode", async () => {
 });
 
 test("renders sidebar skeletons deterministically", async () => {
-  const { SidebarMenuSkeleton } = await vite.ssrLoadModule(
-    "/components/ui/sidebar.tsx",
-  );
+  const { SidebarMenuSkeleton } = await vite.ssrLoadModule("/components/ui/sidebar.tsx");
   const first = renderToStaticMarkup(React.createElement(SidebarMenuSkeleton));
   const second = renderToStaticMarkup(React.createElement(SidebarMenuSkeleton));
 
@@ -256,14 +285,27 @@ test("renders sidebar skeletons deterministically", async () => {
 });
 
 test("finance insights prioritize integration and approval risks", async () => {
-  const { buildFinanceInsights } = await vite.ssrLoadModule(
-    "/lib/finance-insights.ts",
-  );
+  const { buildFinanceInsights } = await vite.ssrLoadModule("/lib/finance-insights.ts");
   const insights = buildFinanceInsights(
     [
-      { module: "INTEGRATION", status: "Failed", amount: 250000, metadata: "{}" },
-      { module: "AP", status: "Pending Approval", amount: 900000, metadata: "{}" },
-      { module: "CASH", status: "Unreconciled", amount: 100000, metadata: "{}" },
+      {
+        module: "INTEGRATION",
+        status: "Failed",
+        amount: 250000,
+        metadata: "{}",
+      },
+      {
+        module: "AP",
+        status: "Pending Approval",
+        amount: 900000,
+        metadata: "{}",
+      },
+      {
+        module: "CASH",
+        status: "Unreconciled",
+        amount: 100000,
+        metadata: "{}",
+      },
     ],
     [],
     {},
@@ -276,15 +318,8 @@ test("finance insights prioritize integration and approval risks", async () => {
 });
 
 test("finance insights return no fake trend when records are healthy", async () => {
-  const { buildFinanceInsights } = await vite.ssrLoadModule(
-    "/lib/finance-insights.ts",
-  );
-  const insights = buildFinanceInsights(
-    [{ module: "GL", status: "Posted", amount: 100000, metadata: "{}" }],
-    [],
-    {},
-    new Date("2026-09-02T00:00:00Z"),
-  );
+  const { buildFinanceInsights } = await vite.ssrLoadModule("/lib/finance-insights.ts");
+  const insights = buildFinanceInsights([{ module: "GL", status: "Posted", amount: 100000, metadata: "{}" }], [], {}, new Date("2026-09-02T00:00:00Z"));
   assert.deepEqual(insights, []);
 });
 
@@ -312,7 +347,10 @@ test("covers the complete AP and AR document workflows", async () => {
   assert.equal(findAccountingDocument("AP", "Purchase Credit Note").supportsStockImpact, true);
   assert.equal(findAccountingDocument("AR", "Credit Note").supportsStockImpact, true);
   for (const code of ["PR", "PO", "PD", "GR", "PI", "PBR", "PP", "PCN", "PDN", "SQ", "SO", "SD", "DN", "SI", "BL", "RC", "SCN", "SDN"]) {
-    assert.ok(ACCOUNTING_DOCUMENTS.some((item) => item.code === code), `missing ${code}`);
+    assert.ok(
+      ACCOUNTING_DOCUMENTS.some((item) => item.code === code),
+      `missing ${code}`,
+    );
   }
   assert.match(source, /function DocumentWorkflowPanel/);
   assert.match(source, /name="linkedDocumentNo"/);
@@ -332,7 +370,7 @@ test("implements one production document form for all AP and AR documents", asyn
   assert.match(source, /หัก ณ ที่จ่าย/);
   assert.match(source, /current\.length < 10/);
   assert.match(api, /body\.action === "update_document"/);
-  assert.match(api, /rawItems\.slice\(0, 10\)/);
+  assert.match(api, /rawItems\s*\.slice\(0, 10\)/);
   assert.match(api, /withholdingTax/);
   assert.match(css, /\.standard-document-dialog/);
   assert.match(css, /\.document-preview-sheet/);
@@ -357,7 +395,18 @@ test("groups AP and AR by workflow and validates document-specific controls", as
 
 test("integration contract maps each KC source to the correct accounting module", async () => {
   const { inboundEventSchema, mapInboundEvent } = await vite.ssrLoadModule("/lib/integration-contract.ts");
-  const base = { event_id: "evt-1001", occurred_at: "2026-09-02T10:00:00+07:00", document_no: "2609-1001", period: "2026-09", description: "Production integration test", counterparty: "KC Test", amount: 1250, tax_amount: 87.5, currency: "THB", metadata: {} };
+  const base = {
+    event_id: "evt-1001",
+    occurred_at: "2026-09-02T10:00:00+07:00",
+    document_no: "2609-1001",
+    period: "2026-09",
+    description: "Production integration test",
+    counterparty: "KC Test",
+    amount: 1250,
+    tax_amount: 87.5,
+    currency: "THB",
+    metadata: {},
+  };
   const cases = [
     ["cuto", "sales_invoice", "AR"],
     ["tory", "vendor_bill", "AP"],
@@ -365,13 +414,23 @@ test("integration contract maps each KC source to the correct accounting module"
     ["hr", "payroll_tax", "TAX"],
   ];
   for (const [system, eventType, expectedModule] of cases) {
-    const event = inboundEventSchema.parse({ ...base, event_id: `evt-${system}`, event_type: eventType, document_no: `${system}-1001` });
+    const event = inboundEventSchema.parse({
+      ...base,
+      event_id: `evt-${system}`,
+      event_type: eventType,
+      document_no: `${system}-1001`,
+    });
     const mapped = mapInboundEvent(system, event);
     assert.equal(mapped.module, expectedModule);
     assert.match(mapped.documentNo, new RegExp(`^${system.toUpperCase()}-`));
     assert.equal(mapped.amount, 125000);
   }
-  const inventoryEvent = inboundEventSchema.parse({ ...base, event_id: "evt-inventory-name", event_type: "vendor_bill", document_no: "inventory-1001" });
+  const inventoryEvent = inboundEventSchema.parse({
+    ...base,
+    event_id: "evt-inventory-name",
+    event_type: "vendor_bill",
+    document_no: "inventory-1001",
+  });
   assert.equal(mapInboundEvent("tory", inventoryEvent).sourceSystem, "KC Inventory");
 });
 
@@ -434,7 +493,15 @@ test("sign-in page follows the split enterprise layout and preserves ChatGPT aut
 
 test("integration contract rejects unsupported events and unsafe source URLs", async () => {
   const { inboundEventSchema, mapInboundEvent, validateExternalBaseUrl } = await vite.ssrLoadModule("/lib/integration-contract.ts");
-  const event = inboundEventSchema.parse({ event_id: "evt-invalid", event_type: "unsupported", occurred_at: "2026-09-02T10:00:00Z", document_no: "BAD-100", period: "2026-09", description: "Invalid event", amount: 1 });
+  const event = inboundEventSchema.parse({
+    event_id: "evt-invalid",
+    event_type: "unsupported",
+    occurred_at: "2026-09-02T10:00:00Z",
+    document_no: "BAD-100",
+    period: "2026-09",
+    description: "Invalid event",
+    amount: 1,
+  });
   assert.throws(() => mapInboundEvent("cuto", event), /ไม่รองรับ event_type/);
   assert.throws(() => validateExternalBaseUrl("http://example.com"), /HTTPS/);
   assert.throws(() => validateExternalBaseUrl("https://127.0.0.1"), /ปลอดภัย/);
