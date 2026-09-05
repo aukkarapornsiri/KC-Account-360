@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { ArrowRight, Building2, CheckCircle2, FileSearch, Languages, LockKeyhole, ShieldCheck, UserRoundCheck } from "lucide-react";
+import { ArrowRight, Building2, CheckCircle2, FileSearch, LockKeyhole, ShieldCheck, UserRoundCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { LanguageMenu } from "@/components/language-menu";
 
 type Language = "th" | "en";
 
@@ -55,10 +55,7 @@ export default function SignInView({ signInHref }: { signInHref: string }) {
         <section className="signin-access-panel">
           <div className="signin-access-top">
             <span>KC ACCOUNT 360 · {tr("ระบบบัญชีและการเงินอัจฉริยะ", "INTELLIGENT FINANCE SYSTEM")}</span>
-            <ToggleGroup type="single" value={language} onValueChange={changeLanguage} className="signin-language-switch" aria-label={tr("เลือกภาษา", "Select language")}>
-              <ToggleGroupItem value="th" aria-label="ภาษาไทย"><Languages />TH</ToggleGroupItem>
-              <ToggleGroupItem value="en" aria-label="English">EN</ToggleGroupItem>
-            </ToggleGroup>
+            <LanguageMenu language={language} onChange={changeLanguage} compact />
           </div>
 
           <div className="signin-access-content">
