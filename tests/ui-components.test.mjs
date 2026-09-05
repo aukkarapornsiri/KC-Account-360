@@ -113,6 +113,8 @@ test("provides the KC EAM-inspired System Control settings workspace", async () 
   const api = await readFile(new URL("../app/api/records/route.ts", import.meta.url), "utf8");
   const logoApi = await readFile(new URL("../app/api/branding/logo/route.ts", import.meta.url), "utf8");
   const signIn = await readFile(new URL("../app/signin-view.tsx", import.meta.url), "utf8");
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+  const applicationLogo = await readFile(new URL("../public/kc-account-360-app-logo.png", import.meta.url));
   const hostedBranding = await readFile(new URL("../lib/hosted-branding.ts", import.meta.url), "utf8");
 
   assert.match(source, /className="system-control-tabs"/);
@@ -124,9 +126,14 @@ test("provides the KC EAM-inspired System Control settings workspace", async () 
   assert.match(logoApi, /brand_logo_key/);
   assert.match(logoApi, /file\.size > 1024 \* 1024/);
   assert.match(source, /onBrandLogoChange/);
-  assert.match(source, /brandLogoUrl\(data\?\.settings\.brand_logo_key\)/);
+  assert.match(source, /APPLICATION_LOGO_SRC = "\/kc-account-360-app-logo\.png"/);
+  assert.match(source, /src=\{APPLICATION_LOGO_SRC\}/);
+  assert.match(source, /brandLogoUrl\(data\.settings\.brand_logo_key\)/);
   assert.match(source, /brandLogoUrl\(settings\.brand_logo_key\)/);
-  assert.match(signIn, /src="\/api\/branding\/logo"/);
+  assert.match(source, /Company Logo/);
+  assert.match(signIn, /src="\/kc-account-360-app-logo\.png"/);
+  assert.match(layout, /icon:\s*"\/kc-account-360-app-logo\.png"/);
+  assert.ok(applicationLogo.length > 1000);
   assert.match(hostedBranding, /env\.BUCKET\.put/);
   assert.match(hostedBranding, /ON CONFLICT\(key\) DO UPDATE/);
   assert.doesNotMatch(source, /src="\/account360-logo\.png"/);

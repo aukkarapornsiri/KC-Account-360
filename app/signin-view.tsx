@@ -34,7 +34,7 @@ export default function SignInView({ signInHref }: { signInHref: string }) {
       <section className="signin-shell" aria-label={tr("เข้าสู่ระบบ KC Account 360", "Sign in to KC Account 360")}>
         <aside className="signin-brand-panel">
           <div className="signin-brand-logo">
-            <Image src="/api/branding/logo" width={2172} height={724} alt="KC Account 360" priority unoptimized />
+            <Image src="/kc-account-360-app-logo.png" width={1326} height={369} alt="KC Account 360" priority />
           </div>
 
           <div className="signin-brand-copy">
