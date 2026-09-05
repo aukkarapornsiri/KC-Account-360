@@ -374,16 +374,19 @@ test("client handles empty and malformed responses for every API action", async 
 
 test("language switch supports Thai and English and remembers the selection", async () => {
   const source = await readFile(new URL("../app/kc-account-app.tsx", import.meta.url), "utf8");
+  const menu = await readFile(new URL("../components/language-menu.tsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-  assert.match(source, /<ToggleGroup type="single"/);
-  assert.match(source, /<ToggleGroupItem value="th"/);
-  assert.match(source, /<ToggleGroupItem value="en"/);
+  assert.match(source, /<LanguageMenu language=\{language\} onChange=\{changeLanguage\}/);
+  assert.match(menu, /<Globe2 \/>/);
+  assert.match(menu, /<ChevronDown className="language-menu-chevron" \/>/);
+  assert.match(menu, /<DropdownMenuRadioItem value="th"/);
+  assert.match(menu, /<DropdownMenuRadioItem value="en"/);
   assert.match(source, /kc-account-language/);
   assert.match(source, /document\.documentElement\.lang/);
   assert.match(source, /LanguageContext\.Provider/);
   assert.match(source, /PAGE_THAI/);
-  assert.match(styles, /\.language-switch/);
-  assert.match(styles, /\[data-state="on"\]/);
+  assert.match(styles, /\.language-menu-trigger/);
+  assert.match(styles, /border-radius:\s*var\(--radius-full\)/);
 });
 
 test("sign-in page follows the split enterprise layout and preserves ChatGPT authentication", async () => {
@@ -394,7 +397,7 @@ test("sign-in page follows the split enterprise layout and preserves ChatGPT aut
   assert.match(source, /className="signin-brand-panel"/);
   assert.match(source, /className="signin-access-panel"/);
   assert.match(source, /ChatGPT Workspace/);
-  assert.match(source, /<ToggleGroup type="single"/);
+  assert.match(source, /<LanguageMenu language=\{language\} onChange=\{changeLanguage\} compact \/>/);
   assert.doesNotMatch(source, /type="password"/);
   assert.match(styles, /\.signin-shell\s*\{[^}]*grid-template-columns:/s);
   assert.match(styles, /@media \(max-width: 820px\)/);
