@@ -3,16 +3,16 @@ import { NextResponse } from "next/server";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { getCompanyAccess, hasPermission } from "@/app/api/access";
 import { getDb } from "@/db";
-import { accountingPeriods, approvalInstances, approvalSteps, auditEvents, journalEntries } from "@/db/schema";
+import { accountingPeriods, approvalInstances, approvalSteps, auditEvents, journalEntries, journalLines } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await getChatGPTUser();
   if (!user) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
-  const body = await request.json().catch(() => null) as { action?: string; reason?: string } | null;
+  const body = await request.json().catch(() => null) as { action?: string; reason?: string; reversalPeriodId?: string; accountingDate?: string } | null;
   const action = body?.action;
-  if (!action || !["approve", "reject", "post"].includes(action)) return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
+  if (!action || !["approve", "reject", "post", "reverse"].includes(action)) return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
   const { id } = await context.params;
   const reason = body?.reason?.trim().slice(0, 500) || null;
 
@@ -22,8 +22,39 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const [journal] = await tx.select().from(journalEntries).where(eq(journalEntries.id, id)).limit(1);
       if (!journal) throw new Error("JOURNAL_NOT_FOUND");
       const access = await getCompanyAccess(user.email, journal.tenantId, journal.companyId);
-      if (!access || (action === "post" ? !hasPermission(access, "post") : !hasPermission(access, "approve"))) throw new Error("COMPANY_ACCESS_REQUIRED");
+      if (!access || (["post", "reverse"].includes(action) ? !hasPermission(access, "post") : !hasPermission(access, "approve"))) throw new Error("COMPANY_ACCESS_REQUIRED");
       const now = new Date().toISOString();
+
+      if (action === "reverse") {
+        if (journal.status !== "POSTED") throw new Error("JOURNAL_NOT_POSTED");
+        if (!reason) throw new Error("REVERSAL_REASON_REQUIRED");
+        const reversalPeriodId = body?.reversalPeriodId || journal.periodId;
+        const accountingDate = body?.accountingDate || journal.accountingDate;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(accountingDate)) throw new Error("REVERSAL_DATE_INVALID");
+        const [targetPeriod] = await tx.select().from(accountingPeriods).where(and(eq(accountingPeriods.id, reversalPeriodId), eq(accountingPeriods.companyId, journal.companyId))).limit(1);
+        if (!targetPeriod || !["OPEN", "SOFT_CLOSE"].includes(targetPeriod.status) || accountingDate < targetPeriod.startsOn || accountingDate > targetPeriod.endsOn) throw new Error("REVERSAL_PERIOD_CLOSED");
+        const [existingReversal] = await tx.select({ id: journalEntries.id }).from(journalEntries).where(eq(journalEntries.reversalOfId, journal.id)).limit(1);
+        if (existingReversal) throw new Error("JOURNAL_ALREADY_REVERSED");
+        const sourceLines = await tx.select().from(journalLines).where(eq(journalLines.journalEntryId, journal.id)).orderBy(journalLines.lineNo);
+        if (!sourceLines.length) throw new Error("JOURNAL_LINES_NOT_FOUND");
+        const reversalNo = `RV-${journal.journalNo}-${Date.now().toString(36).toUpperCase()}`.slice(0, 80);
+        const [reversal] = await tx.insert(journalEntries).values({
+          tenantId: journal.tenantId, companyId: journal.companyId, branchId: journal.branchId,
+          periodId: targetPeriod.id, accountingEventId: null, journalNo: reversalNo,
+          journalType: `REVERSAL:${journal.journalType}`, accountingDate,
+          description: `Reverse ${journal.journalNo}: ${reason}`, currency: journal.currency,
+          exchangeRate: journal.exchangeRate, status: "APPROVED", reversalOfId: journal.id,
+          createdBy: user.email, approvedBy: user.email,
+        }).returning();
+        await tx.insert(journalLines).values(sourceLines.map((line) => ({
+          journalEntryId: reversal.id, lineNo: line.lineNo, accountId: line.accountId,
+          description: `Reverse: ${line.description}`, debit: line.credit, credit: line.debit,
+          baseDebit: line.baseCredit, baseCredit: line.baseDebit, dimensions: line.dimensions,
+        })));
+        await tx.update(journalEntries).set({ status: "POSTED", postedBy: user.email, postedAt: now, updatedAt: now, version: 2 }).where(and(eq(journalEntries.id, reversal.id), eq(journalEntries.status, "APPROVED")));
+        await tx.insert(auditEvents).values({ tenantId: journal.tenantId, companyId: journal.companyId, branchId: journal.branchId, module: "GL", entityType: "JOURNAL", entityId: reversal.id, action: "REVERSE", actorUserId: user.email, reason, oldValue: { journalId: journal.id, journalNo: journal.journalNo }, newValue: { reversalJournalId: reversal.id, reversalNo } });
+        return { status: "POSTED", reversalJournalId: reversal.id, reversalNo };
+      }
 
       if (action === "post") {
         if (journal.status !== "APPROVED") throw new Error("JOURNAL_NOT_APPROVED");

@@ -451,7 +451,7 @@ function IntegrationView({ active, data, working, action, permissions, onNavigat
   const legacyErrors = data.records.filter((record) => record.module === "INTEGRATION" && ["Failed", "Queued"].includes(record.status) && (!selected || connectorNames.has(record.sourceSystem)));
   const processed = events.filter((event) => event.status === "Processed").length;
   const failed = events.filter((event) => event.status === "Failed").length + legacyErrors.length;
-  const canManage = permissions.includes("manage_settings");
+  const canManage = permissions.includes("manage_integrations");
   const canSync = permissions.includes("reconcile");
   return <div className="integration-workspace">
     <IntegrationTabs active={active} onNavigate={onNavigate} />

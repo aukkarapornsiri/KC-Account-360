@@ -88,13 +88,13 @@ export async function POST(request: Request) {
   if (!system) return jsonError("ระบบต้นทางไม่ถูกต้อง", 422);
 
   if (body.action === "rotate_key") {
-    if (!hasPermission(access, "manage_settings")) return jsonError("คุณไม่มีสิทธิ์จัดการ API Key", 403);
+    if (!hasPermission(access, "manage_integrations")) return jsonError("คุณไม่มีสิทธิ์จัดการ API Key", 403);
     const apiKey = await createConnectorApiKey(system, user.email);
     return NextResponse.json({ ok: true, apiKey, shownOnce: true });
   }
 
   if (body.action === "update_connector") {
-    if (!hasPermission(access, "manage_settings")) return jsonError("คุณไม่มีสิทธิ์ตั้งค่า Connector", 403);
+    if (!hasPermission(access, "manage_integrations")) return jsonError("คุณไม่มีสิทธิ์ตั้งค่า Connector", 403);
     let baseUrl = "";
     try { baseUrl = body.baseUrl ? validateExternalBaseUrl(String(body.baseUrl).trim()) : ""; }
     catch (error) { return jsonError(error instanceof Error ? error.message : "Endpoint ไม่ถูกต้อง", 422); }
